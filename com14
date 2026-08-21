@@ -1,28 +1,25 @@
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
-local Window = Library:CreateWindow({
-    Title = "Frozent0",
-    Footer = "v1.0",
-    Icon = 132705719986283,
-    ToggleKeybind = Enum.KeyCode.RightControl,
-    Center = true,
-    AutoShow = true,
-    Resizable = true,
-    ShowCustomCursor = false,
-    NotifySide = "Right",
+local Window = Rayfield:CreateWindow({
+    Name = "Frozent0",
+    LoadingTitle = "Frozent0",
+    LoadingSubtitle = "v1.0",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "Frozent0",
+        FileName = "Config"
+    },
+    Discord = {
+        Enabled = false,
+        Invite = "noinvitelink",
+        RememberJoins = true
+    },
+    KeySystem = false
 })
 
-local Tabs = {
-    Main = Window:AddTab("Main", "house"),
-    ["UI Settings"] = Window:AddTab("UI Settings", "settings"),
-}
-
-local SilentBox = Tabs.Main:AddLeftGroupbox("Silent Aim", "crosshair")
-local OtherBox  = Tabs.Main:AddLeftGroupbox("Other functions", "wrench")
-local EspBox    = Tabs.Main:AddRightGroupbox("Esp", "eye")
+local MainTab = Window:CreateTab("Main", 4483362458)
+local EspTab = Window:CreateTab("ESP", 4483362458)
+local OtherTab = Window:CreateTab("Other", 4483362458)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -193,68 +190,95 @@ pcall(function()
     setreadonly(mt, true)
 end)
 
-SilentBox:AddToggle("SilentAimEnabled", {
-    Text = "Silent Aim",
-    Default = false,
-    Callback = function(Value) cfg.Enabled = Value end,
+MainTab:CreateSection("Silent Aim")
+
+MainTab:CreateToggle({
+    Name = "Silent Aim",
+    CurrentValue = false,
+    Flag = "SilentAimEnabled",
+    Callback = function(Value)
+        cfg.Enabled = Value
+    end,
 })
 
-SilentBox:AddSlider("SilentFOV", {
-    Text = "FOV",
-    Default = 180,
-    Min = 10,
-    Max = 360,
-    Rounding = 0,
-    Callback = function(Value) cfg.FOV = Value end,
+MainTab:CreateSlider({
+    Name = "FOV",
+    Range = {10, 360},
+    Increment = 1,
+    CurrentValue = 180,
+    Flag = "SilentFOV",
+    Callback = function(Value)
+        cfg.FOV = Value
+    end,
 })
 
-SilentBox:AddSlider("SilentDistance", {
-    Text = "Max Distance",
-    Default = 400,
-    Min = 50,
-    Max = 2000,
-    Rounding = 0,
-    Callback = function(Value) cfg.MaxDistance = Value end,
+MainTab:CreateSlider({
+    Name = "Max Distance",
+    Range = {50, 2000},
+    Increment = 10,
+    CurrentValue = 400,
+    Flag = "SilentDistance",
+    Callback = function(Value)
+        cfg.MaxDistance = Value
+    end,
 })
 
-SilentBox:AddDropdown("SilentHitPart", {
-    Text = "Target Part",
-    Values = { "Head", "Torso", "HumanoidRootPart" },
-    Default = 2,
-    Callback = function(Value) cfg.TargetPart = Value end,
+MainTab:CreateDropdown({
+    Name = "Target Part",
+    Options = {"Head", "Torso", "HumanoidRootPart"},
+    CurrentOption = {"Torso"},
+    MultipleOptions = false,
+    Flag = "SilentHitPart",
+    Callback = function(Value)
+        cfg.TargetPart = Value[1]
+    end,
 })
 
-SilentBox:AddToggle("SilentWallCheck", {
-    Text = "Wall Check",
-    Default = false,
-    Callback = function(Value) cfg.WallCheck = Value end,
+MainTab:CreateToggle({
+    Name = "Wall Check",
+    CurrentValue = false,
+    Flag = "SilentWallCheck",
+    Callback = function(Value)
+        cfg.WallCheck = Value
+    end,
 })
 
-SilentBox:AddToggle("SilentTeamCheck", {
-    Text = "Team Check",
-    Default = false,
-    Callback = function(Value) cfg.TeamCheck = Value end,
+MainTab:CreateToggle({
+    Name = "Team Check",
+    CurrentValue = false,
+    Flag = "SilentTeamCheck",
+    Callback = function(Value)
+        cfg.TeamCheck = Value
+    end,
 })
 
-SilentBox:AddToggle("SilentPrediction", {
-    Text = "Prediction",
-    Default = false,
-    Callback = function(Value) cfg.Prediction = Value end,
+MainTab:CreateToggle({
+    Name = "Prediction",
+    CurrentValue = false,
+    Flag = "SilentPrediction",
+    Callback = function(Value)
+        cfg.Prediction = Value
+    end,
 })
 
-SilentBox:AddSlider("SilentPredictionAmount", {
-    Text = "Prediction Amount",
-    Default = 0.15,
-    Min = 0,
-    Max = 0.5,
-    Rounding = 2,
-    Callback = function(Value) cfg.PredictionAmount = Value end,
+MainTab:CreateSlider({
+    Name = "Prediction Amount",
+    Range = {0, 0.5},
+    Increment = 0.01,
+    CurrentValue = 0.15,
+    Flag = "SilentPredictionAmount",
+    Callback = function(Value)
+        cfg.PredictionAmount = Value
+    end,
 })
 
-SilentBox:AddToggle("SilentSnapline", {
-    Text = "Snapline",
-    Default = true,
-    Callback = function(Value) cfg.ShowSnapline = Value end,
+MainTab:CreateToggle({
+    Name = "Snapline",
+    CurrentValue = true,
+    Flag = "SilentSnapline",
+    Callback = function(Value)
+        cfg.ShowSnapline = Value
+    end,
 })
 
 local COLOR_BOX      = Color3.fromRGB(0, 255, 80)
@@ -627,72 +651,103 @@ end)
 Players.PlayerAdded:Connect(CreateESP)
 Players.PlayerRemoving:Connect(RemoveESP)
 
-EspBox:AddToggle("ESPEnabled", {
-    Text = "Enable ESP",
-    Default = false,
+EspTab:CreateSection("ESP")
+
+EspTab:CreateToggle({
+    Name = "Enable ESP",
+    CurrentValue = false,
+    Flag = "ESPEnabled",
     Callback = function(Value)
         ESPSettings.Enabled = Value
         if not Value then CleanupESP() end
     end,
 })
 
-EspBox:AddToggle("ESPBox", {
-    Text = "Box ESP",
-    Default = false,
-    Callback = function(Value) ESPSettings.BoxESP = Value end,
+EspTab:CreateToggle({
+    Name = "Box ESP",
+    CurrentValue = false,
+    Flag = "ESPBox",
+    Callback = function(Value)
+        ESPSettings.BoxESP = Value
+    end,
 })
 
-EspBox:AddDropdown("ESPBoxStyle", {
-    Text = "Box Style",
-    Values = { "Corner", "Full" },
-    Default = 1,
-    Callback = function(Value) ESPSettings.BoxStyle = Value end,
+EspTab:CreateDropdown({
+    Name = "Box Style",
+    Options = {"Corner", "Full"},
+    CurrentOption = {"Corner"},
+    MultipleOptions = false,
+    Flag = "ESPBoxStyle",
+    Callback = function(Value)
+        ESPSettings.BoxStyle = Value[1]
+    end,
 })
 
-EspBox:AddToggle("ESPName", {
-    Text = "Name ESP",
-    Default = false,
-    Callback = function(Value) ESPSettings.NameESP = Value end,
+EspTab:CreateToggle({
+    Name = "Name ESP",
+    CurrentValue = false,
+    Flag = "ESPName",
+    Callback = function(Value)
+        ESPSettings.NameESP = Value
+    end,
 })
 
-EspBox:AddToggle("ESPHealth", {
-    Text = "Health ESP",
-    Default = false,
-    Callback = function(Value) ESPSettings.HealthESP = Value end,
+EspTab:CreateToggle({
+    Name = "Health ESP",
+    CurrentValue = false,
+    Flag = "ESPHealth",
+    Callback = function(Value)
+        ESPSettings.HealthESP = Value
+    end,
 })
 
-EspBox:AddToggle("ESPTracer", {
-    Text = "Tracers",
-    Default = false,
-    Callback = function(Value) ESPSettings.TracerESP = Value end,
+EspTab:CreateToggle({
+    Name = "Tracers",
+    CurrentValue = false,
+    Flag = "ESPTracer",
+    Callback = function(Value)
+        ESPSettings.TracerESP = Value
+    end,
 })
 
-EspBox:AddDropdown("ESPTracerOrigin", {
-    Text = "Tracer Origin",
-    Values = { "Bottom", "Top", "Mouse", "Center" },
-    Default = 1,
-    Callback = function(Value) ESPSettings.TracerOrigin = Value end,
+EspTab:CreateDropdown({
+    Name = "Tracer Origin",
+    Options = {"Bottom", "Top", "Mouse", "Center"},
+    CurrentOption = {"Bottom"},
+    MultipleOptions = false,
+    Flag = "ESPTracerOrigin",
+    Callback = function(Value)
+        ESPSettings.TracerOrigin = Value[1]
+    end,
 })
 
-EspBox:AddToggle("ESPSkeleton", {
-    Text = "Skeleton",
-    Default = false,
-    Callback = function(Value) ESPSettings.SkeletonESP = Value end,
+EspTab:CreateToggle({
+    Name = "Skeleton",
+    CurrentValue = false,
+    Flag = "ESPSkeleton",
+    Callback = function(Value)
+        ESPSettings.SkeletonESP = Value
+    end,
 })
 
-EspBox:AddToggle("ESPChams", {
-    Text = "Chams",
-    Default = false,
-    Callback = function(Value) ESPSettings.ChamsEnabled = Value end,
+EspTab:CreateToggle({
+    Name = "Chams",
+    CurrentValue = false,
+    Flag = "ESPChams",
+    Callback = function(Value)
+        ESPSettings.ChamsEnabled = Value
+    end,
 })
 
-EspBox:AddSlider("ESPMaxDistance", {
-    Text = "Max Distance",
-    Default = 1000,
-    Min = 100,
-    Max = 5000,
-    Rounding = 0,
-    Callback = function(Value) ESPSettings.MaxDistance = Value end,
+EspTab:CreateSlider({
+    Name = "Max Distance",
+    Range = {100, 5000},
+    Increment = 50,
+    CurrentValue = 1000,
+    Flag = "ESPMaxDistance",
+    Callback = function(Value)
+        ESPSettings.MaxDistance = Value
+    end,
 })
 
 getgenv().SplitSecond = {
@@ -711,26 +766,27 @@ local function stopLoop()
     end
 end
 
-OtherBox:AddToggle("SplitSecondEnabled", {
-    Text = "Split Second Auto",
-    Default = false,
+OtherTab:CreateSection("Split Second")
+
+OtherTab:CreateToggle({
+    Name = "Split Second Auto",
+    CurrentValue = false,
+    Flag = "SplitSecondEnabled",
     Callback = function(Value)
         SS.Enabled = Value
         if not Value then stopLoop() end
     end,
 })
 
-OtherBox:AddInput("SplitError", {
-    Text = "Error (5 = 0.05)",
-    Default = "0",
-    Numeric = true,
-    Finished = true,
+OtherTab:CreateInput({
+    Name = "Error (5 = 0.05)",
+    CurrentValue = "0",
+    PlaceholderText = "0",
+    Flag = "SplitError",
     Callback = function(Value)
         SS.ErrorAmount = tonumber(Value) or 0
     end,
 })
-
-
 
 local function parseTarget(text)
     if type(text) ~= "string" then return nil end
@@ -815,14 +871,9 @@ task.spawn(function()
     end)
 end)
 
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-ThemeManager:SetFolder("Frozent0")
-SaveManager:SetFolder("Frozent0/Config")
-SaveManager:BuildConfigSection(Tabs["UI Settings"])
-ThemeManager:ApplyToTab(Tabs["UI Settings"])
-SaveManager:LoadAutoloadConfig()
-
-Library:Notify("Loaded", 3)
+Rayfield:Notify({
+    Title = "Frozent0",
+    Content = "Loaded",
+    Duration = 3,
+    Image = 4483362458,
+})
