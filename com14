@@ -37,6 +37,8 @@ getgenv().SilentAim = {
     SnaplineColor = Color3.fromRGB(255, 0, 255),
     SnaplineThickness = 1,
     SnaplineTransparency = 0.5,
+    AimCircle = false,
+    AimCircleRadius = 120,
 }
 
 local cfg = getgenv().SilentAim
@@ -94,6 +96,8 @@ local function scanTarget()
     local mousePos = UserInputService:GetMouseLocation()
     local origin = Camera.CFrame.Position
     local fovPx = fovToPixels()
+    local vp = Camera.ViewportSize
+    local screenCenter = Vector2.new(vp.X / 2, vp.Y / 2)
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr == LocalPlayer then continue end
         if not isAlive(plr) then continue end
@@ -114,11 +118,19 @@ local function scanTarget()
         if hasWall(targetPos, char) then continue end
         local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
         if not onScreen or screenPos.Z <= 0 then continue end
-        local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if screenDist <= fovPx and screenDist < bestDist then
+        local sp = Vector2.new(screenPos.X, screenPos.Y)
+        local screenDist
+        if cfg.AimCircle then
+            screenDist = (sp - screenCenter).Magnitude
+            if screenDist > cfg.AimCircleRadius then continue end
+        else
+            screenDist = (sp - mousePos).Magnitude
+            if screenDist > fovPx then continue end
+        end
+        if screenDist < bestDist then
             bestDist = screenDist
             bestPart = part
-            bestScreen = Vector2.new(screenPos.X, screenPos.Y)
+            bestScreen = sp
         end
     end
     cachedPart, cachedScreen, cachedOnScreen = bestPart, bestScreen, bestPart ~= nil
@@ -139,6 +151,32 @@ pcall(function()
     snapline.Visible = false
 end)
 
+local aimCircleDraw
+pcall(function()
+    aimCircleDraw = Drawing.new("Circle")
+    aimCircleDraw.Thickness = 1.5
+    aimCircleDraw.NumSides = 64
+    aimCircleDraw.Radius = cfg.AimCircleRadius
+    aimCircleDraw.Filled = false
+    aimCircleDraw.Color = Color3.fromRGB(255, 0, 0)
+    aimCircleDraw.Transparency = 1
+    aimCircleDraw.Visible = false
+end)
+
+if aimCircleDraw then
+    RunService.RenderStepped:Connect(function()
+        if not cfg.AimCircle then
+            aimCircleDraw.Visible = false
+            return
+        end
+        local vp = Camera.ViewportSize
+        aimCircleDraw.Position = Vector2.new(vp.X / 2, vp.Y / 2)
+        aimCircleDraw.Radius = cfg.AimCircleRadius
+        aimCircleDraw.Color = Color3.fromRGB(255, 0, 0)
+        aimCircleDraw.Visible = true
+    end)
+end
+
 if snapline then
     RunService.RenderStepped:Connect(function()
         if not cfg.Enabled or not cfg.ShowSnapline then
@@ -150,8 +188,14 @@ if snapline then
             snapline.Visible = false
             return
         end
-        local mouse = UserInputService:GetMouseLocation()
-        snapline.From = mouse
+        local fromPos
+        if cfg.AimCircle then
+            local vp = Camera.ViewportSize
+            fromPos = Vector2.new(vp.X / 2, vp.Y / 2)
+        else
+            fromPos = UserInputService:GetMouseLocation()
+        end
+        snapline.From = fromPos
         snapline.To = screen
         snapline.Color = cfg.SnaplineColor
         snapline.Thickness = cfg.SnaplineThickness
@@ -160,19 +204,32 @@ if snapline then
     end)
 end
 
+local shotLockPart = nil
+local shotLockActive = false
+local denyShot = false
+
+local function getAimPosition(part)
+    if not part then return nil end
+    local aimPos = part.Position
+    if cfg.Prediction then
+        local vel = part.AssemblyLinearVelocity
+        aimPos = part.Position + (vel or Vector3.zero) * cfg.PredictionAmount
+    end
+    return aimPos
+end
+
 pcall(function()
     local mt = getrawmetatable(Mouse)
     local oldIndex = mt.__index
     setreadonly(mt, false)
     mt.__index = function(self, key)
         if cfg.Enabled and (key == "Hit" or key == "Target" or key == "UnitRay") then
-            local target = getCachedTarget()
-            if target then
-                local aimPos = target.Position
-                if cfg.Prediction then
-                    local vel = target.AssemblyLinearVelocity
-                    aimPos = target.Position + (vel or Vector3.zero) * cfg.PredictionAmount
-                end
+            if denyShot then
+                return oldIndex(self, key)
+            end
+            local target = shotLockActive and shotLockPart or getCachedTarget()
+            if target and target.Parent then
+                local aimPos = getAimPosition(target)
                 if key == "Hit" then
                     return CFrame.new(aimPos)
                 elseif key == "Target" then
@@ -188,6 +245,69 @@ pcall(function()
     setreadonly(mt, true)
 end)
 
+pcall(function()
+    local mt = getrawmetatable(game)
+    local oldNamecall = mt.__namecall
+    setreadonly(mt, false)
+    mt.__namecall = function(self, ...)
+        local method = getnamecallmethod()
+        if cfg.Enabled and denyShot and method == "FireServer" then
+            local args = {...}
+            local a1 = args[1]
+            if a1 == "lmb" or a1 == "part" then
+                return
+            end
+            local name = ""
+            pcall(function() name = self.Name end)
+            if name == "fistremote" or name == "FistRemote" then
+                return
+            end
+        end
+        return oldNamecall(self, ...)
+    end
+    setreadonly(mt, true)
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    if not cfg.Enabled then
+        shotLockActive = false
+        shotLockPart = nil
+        denyShot = false
+        return
+    end
+    local part = select(1, scanTarget())
+    if not part then
+        shotLockActive = false
+        shotLockPart = nil
+        denyShot = true
+    else
+        denyShot = false
+        shotLockPart = part
+        shotLockActive = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+    shotLockActive = false
+    shotLockPart = nil
+    denyShot = false
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not cfg.Enabled or not shotLockActive or not shotLockPart then return end
+    if not shotLockPart.Parent then
+        shotLockActive = false
+        shotLockPart = nil
+        return
+    end
+    local aimPos = getAimPosition(shotLockPart)
+    if not aimPos then return end
+    local camPos = Camera.CFrame.Position
+    Camera.CFrame = CFrame.new(camPos, aimPos)
+end)
+
 MainTab:CreateSection("Silent Aim")
 MainTab:CreateToggle({ Name = "Silent Aim", CurrentValue = false, Flag = "SilentAimEnabled", Callback = function(Value) cfg.Enabled = Value end })
 MainTab:CreateSlider({ Name = "FOV", Range = {10, 360}, Increment = 1, CurrentValue = 180, Flag = "SilentFOV", Callback = function(Value) cfg.FOV = Value end })
@@ -198,6 +318,8 @@ MainTab:CreateToggle({ Name = "Team Check", CurrentValue = false, Flag = "Silent
 MainTab:CreateToggle({ Name = "Prediction", CurrentValue = false, Flag = "SilentPrediction", Callback = function(Value) cfg.Prediction = Value end })
 MainTab:CreateSlider({ Name = "Prediction Amount", Range = {0, 0.5}, Increment = 0.01, CurrentValue = 0.15, Flag = "SilentPredictionAmount", Callback = function(Value) cfg.PredictionAmount = Value end })
 MainTab:CreateToggle({ Name = "Snapline", CurrentValue = true, Flag = "SilentSnapline", Callback = function(Value) cfg.ShowSnapline = Value end })
+MainTab:CreateToggle({ Name = "Aim Circle", CurrentValue = false, Flag = "SilentAimCircle", Callback = function(Value) cfg.AimCircle = Value end })
+MainTab:CreateSlider({ Name = "Aim Circle Radius", Range = {20, 500}, Increment = 5, CurrentValue = 120, Flag = "SilentAimCircleRadius", Callback = function(Value) cfg.AimCircleRadius = Value end })
 
 local COLOR_BOX = Color3.fromRGB(0, 255, 80)
 local COLOR_TRACER = Color3.fromRGB(0, 255, 80)
@@ -747,5 +869,41 @@ OtherTab:CreateToggle({
         if Value then startPickupNoCD() else stopPickupNoCD() end
     end,
 })
+
+OtherTab:CreateSection("Config")
+OtherTab:CreateButton({
+    Name = "Save Config",
+    Callback = function()
+        pcall(function()
+            Rayfield.SaveConfiguration(Rayfield)
+        end)
+        pcall(function()
+            Rayfield:SaveConfiguration()
+        end)
+        Rayfield:Notify({ Title = "Frozent0", Content = "Config saved", Duration = 2, Image = 4483362458 })
+    end,
+})
+OtherTab:CreateButton({
+    Name = "Load Config",
+    Callback = function()
+        pcall(function()
+            Rayfield.LoadConfiguration(Rayfield)
+        end)
+        pcall(function()
+            Rayfield:LoadConfiguration()
+        end)
+        Rayfield:Notify({ Title = "Frozent0", Content = "Config loaded", Duration = 2, Image = 4483362458 })
+    end,
+})
+
+task.defer(function()
+    task.wait(0.35)
+    pcall(function()
+        Rayfield.LoadConfiguration(Rayfield)
+    end)
+    pcall(function()
+        Rayfield:LoadConfiguration()
+    end)
+end)
 
 Rayfield:Notify({ Title = "Frozent0", Content = "Loaded", Duration = 3, Image = 4483362458 })
