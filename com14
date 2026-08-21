@@ -59,11 +59,21 @@ local function getTargetPart(char)
         or char:FindFirstChild("HumanoidRootPart")
 end
 
+local function getRightHand()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    return char:FindFirstChild("RightHand")
+        or char:FindFirstChild("Right Arm")
+        or char:FindFirstChild("RightUpperArm")
+end
+
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-local function hasWall(origin, targetPos, targetChar)
+local function hasWall(targetPos, targetChar)
     if not cfg.WallCheck then return false end
+    local hand = getRightHand()
+    local origin = hand and hand.Position or Camera.CFrame.Position
     local filter = { LocalPlayer.Character, Camera }
     if targetChar then table.insert(filter, targetChar) end
     rayParams.FilterDescendantsInstances = filter
@@ -101,7 +111,7 @@ local function scanTarget()
         end
         local dist3D = (targetPos - origin).Magnitude
         if dist3D > cfg.MaxDistance then continue end
-        if hasWall(origin, targetPos, char) then continue end
+        if hasWall(targetPos, char) then continue end
         local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
         if not onScreen or screenPos.Z <= 0 then continue end
         local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
@@ -646,36 +656,79 @@ OtherTab:CreateToggle({
     end,
 })
 
-local promptConnections = {}
-local function stripPrompt(prompt)
-    if not prompt:IsA("ProximityPrompt") then return end
+local EXCLUDE_PROMPTS = {
+    RevivePrompt = true,
+    BedSleepPrompt = true,
+    CellGatePrompt = true,
+    SinkPrompt = true,
+    SettingsPrompt = true,
+}
+
+local promptOriginals = {}
+
+local function isItemPrompt(prompt)
+    if not prompt:IsA("ProximityPrompt") then return false end
+    if EXCLUDE_PROMPTS[prompt.Name] then return false end
+    local p = prompt.Parent
+    while p and p ~= workspace and p ~= game do
+        if p:IsA("Tool") then return true end
+        p = p.Parent
+    end
+    local action = string.lower(tostring(prompt.ActionText or ""))
+    if string.find(action, "pick", 1, true)
+        or string.find(action, "take", 1, true)
+        or string.find(action, "grab", 1, true) then
+        return true
+    end
+    return false
+end
+
+local function stripItemPrompt(prompt)
+    if not isItemPrompt(prompt) then return end
     pcall(function()
+        if not promptOriginals[prompt] then
+            promptOriginals[prompt] = {
+                HoldDuration = prompt.HoldDuration,
+                RequiresLineOfSight = prompt.RequiresLineOfSight,
+            }
+        end
         prompt.HoldDuration = 0
         prompt.RequiresLineOfSight = false
     end)
 end
 
-local function applyAllPrompts()
-    for _, desc in ipairs(workspace:GetDescendants()) do stripPrompt(desc) end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Character then
-            for _, desc in ipairs(plr.Character:GetDescendants()) do stripPrompt(desc) end
-        end
+local function restoreItemPrompts()
+    for prompt, orig in pairs(promptOriginals) do
+        pcall(function()
+            if prompt and prompt.Parent then
+                prompt.HoldDuration = orig.HoldDuration
+                prompt.RequiresLineOfSight = orig.RequiresLineOfSight
+            end
+        end)
+    end
+    promptOriginals = {}
+end
+
+local promptConnections = {}
+
+local function applyItemPrompts()
+    for _, desc in ipairs(workspace:GetDescendants()) do
+        stripItemPrompt(desc)
     end
 end
 
 local function startPickupNoCD()
     for _, c in ipairs(promptConnections) do pcall(function() c:Disconnect() end) end
     promptConnections = {}
-    applyAllPrompts()
+    applyItemPrompts()
     table.insert(promptConnections, workspace.DescendantAdded:Connect(function(desc)
-        if Misc.PickupNoCD then stripPrompt(desc) end
+        if Misc.PickupNoCD then stripItemPrompt(desc) end
     end))
     table.insert(promptConnections, RunService.Heartbeat:Connect(function()
         if not Misc.PickupNoCD then return end
         for _, desc in ipairs(workspace:GetDescendants()) do
-            if desc:IsA("ProximityPrompt") and desc.HoldDuration > 0 then
-                desc.HoldDuration = 0
+            if desc:IsA("ProximityPrompt") and isItemPrompt(desc) and desc.HoldDuration > 0 then
+                stripItemPrompt(desc)
             end
         end
     end))
@@ -684,10 +737,11 @@ end
 local function stopPickupNoCD()
     for _, c in ipairs(promptConnections) do pcall(function() c:Disconnect() end) end
     promptConnections = {}
+    restoreItemPrompts()
 end
 
 OtherTab:CreateToggle({
-    Name = "Pick up No CD", CurrentValue = false, Flag = "PickupNoCD",
+    Name = "Insta Pick up (Items)", CurrentValue = false, Flag = "PickupNoCD",
     Callback = function(Value)
         Misc.PickupNoCD = Value
         if Value then startPickupNoCD() else stopPickupNoCD() end
