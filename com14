@@ -9,11 +9,7 @@ local Window = Rayfield:CreateWindow({
         FolderName = "Frozent0",
         FileName = "Config"
     },
-    Discord = {
-        Enabled = false,
-        Invite = "noinvitelink",
-        RememberJoins = true
-    },
+    Discord = { Enabled = false, Invite = "noinvitelink", RememberJoins = true },
     KeySystem = false
 })
 
@@ -44,15 +40,17 @@ getgenv().SilentAim = {
 }
 
 local cfg = getgenv().SilentAim
-
 local cachedPart, cachedScreen, cachedOnScreen = nil, nil, false
 local lastScanFrame = -1
 
 local function isAlive(plr)
+    if plr:GetAttribute("IsEliminated") == true then return false end
     local char = plr.Character
     if not char then return false end
     local hum = char:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
+    if not hum or hum.Health <= 0 then return false end
+    if hum:GetState() == Enum.HumanoidStateType.Dead then return false end
+    return true
 end
 
 local function getTargetPart(char)
@@ -67,9 +65,7 @@ rayParams.FilterType = Enum.RaycastFilterType.Exclude
 local function hasWall(origin, targetPos, targetChar)
     if not cfg.WallCheck then return false end
     local filter = { LocalPlayer.Character, Camera }
-    if targetChar then
-        table.insert(filter, targetChar)
-    end
+    if targetChar then table.insert(filter, targetChar) end
     rayParams.FilterDescendantsInstances = filter
     return workspace:Raycast(origin, targetPos - origin, rayParams) ~= nil
 end
@@ -84,12 +80,10 @@ local function scanTarget()
         return cachedPart, cachedScreen, cachedOnScreen
     end
     lastScanFrame = tick()
-
     local bestPart, bestScreen, bestDist = nil, nil, math.huge
     local mousePos = UserInputService:GetMouseLocation()
     local origin = Camera.CFrame.Position
     local fovPx = fovToPixels()
-
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr == LocalPlayer then continue end
         if not isAlive(plr) then continue end
@@ -97,24 +91,19 @@ local function scanTarget()
             local partnerId = LocalPlayer:GetAttribute("DuoPartnerId")
             if partnerId and (plr.UserId == partnerId or tostring(plr.UserId) == tostring(partnerId)) then continue end
         end
-
         local char = plr.Character
         local part = getTargetPart(char)
         if not part then continue end
-
         local targetPos = part.Position
         if cfg.Prediction then
             local vel = part.AssemblyLinearVelocity
             targetPos = part.Position + (vel or Vector3.zero) * cfg.PredictionAmount
         end
-
         local dist3D = (targetPos - origin).Magnitude
         if dist3D > cfg.MaxDistance then continue end
         if hasWall(origin, targetPos, char) then continue end
-
         local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
         if not onScreen or screenPos.Z <= 0 then continue end
-
         local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
         if screenDist <= fovPx and screenDist < bestDist then
             bestDist = screenDist
@@ -122,7 +111,6 @@ local function scanTarget()
             bestScreen = Vector2.new(screenPos.X, screenPos.Y)
         end
     end
-
     cachedPart, cachedScreen, cachedOnScreen = bestPart, bestScreen, bestPart ~= nil
     return cachedPart, cachedScreen, cachedOnScreen
 end
@@ -191,129 +179,32 @@ pcall(function()
 end)
 
 MainTab:CreateSection("Silent Aim")
+MainTab:CreateToggle({ Name = "Silent Aim", CurrentValue = false, Flag = "SilentAimEnabled", Callback = function(Value) cfg.Enabled = Value end })
+MainTab:CreateSlider({ Name = "FOV", Range = {10, 360}, Increment = 1, CurrentValue = 180, Flag = "SilentFOV", Callback = function(Value) cfg.FOV = Value end })
+MainTab:CreateSlider({ Name = "Max Distance", Range = {50, 2000}, Increment = 10, CurrentValue = 400, Flag = "SilentDistance", Callback = function(Value) cfg.MaxDistance = Value end })
+MainTab:CreateDropdown({ Name = "Target Part", Options = {"Head", "Torso", "HumanoidRootPart"}, CurrentOption = {"Torso"}, MultipleOptions = false, Flag = "SilentHitPart", Callback = function(Value) cfg.TargetPart = Value[1] end })
+MainTab:CreateToggle({ Name = "Wall Check", CurrentValue = false, Flag = "SilentWallCheck", Callback = function(Value) cfg.WallCheck = Value end })
+MainTab:CreateToggle({ Name = "Team Check", CurrentValue = false, Flag = "SilentTeamCheck", Callback = function(Value) cfg.TeamCheck = Value end })
+MainTab:CreateToggle({ Name = "Prediction", CurrentValue = false, Flag = "SilentPrediction", Callback = function(Value) cfg.Prediction = Value end })
+MainTab:CreateSlider({ Name = "Prediction Amount", Range = {0, 0.5}, Increment = 0.01, CurrentValue = 0.15, Flag = "SilentPredictionAmount", Callback = function(Value) cfg.PredictionAmount = Value end })
+MainTab:CreateToggle({ Name = "Snapline", CurrentValue = true, Flag = "SilentSnapline", Callback = function(Value) cfg.ShowSnapline = Value end })
 
-MainTab:CreateToggle({
-    Name = "Silent Aim",
-    CurrentValue = false,
-    Flag = "SilentAimEnabled",
-    Callback = function(Value)
-        cfg.Enabled = Value
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "FOV",
-    Range = {10, 360},
-    Increment = 1,
-    CurrentValue = 180,
-    Flag = "SilentFOV",
-    Callback = function(Value)
-        cfg.FOV = Value
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Max Distance",
-    Range = {50, 2000},
-    Increment = 10,
-    CurrentValue = 400,
-    Flag = "SilentDistance",
-    Callback = function(Value)
-        cfg.MaxDistance = Value
-    end,
-})
-
-MainTab:CreateDropdown({
-    Name = "Target Part",
-    Options = {"Head", "Torso", "HumanoidRootPart"},
-    CurrentOption = {"Torso"},
-    MultipleOptions = false,
-    Flag = "SilentHitPart",
-    Callback = function(Value)
-        cfg.TargetPart = Value[1]
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Wall Check",
-    CurrentValue = false,
-    Flag = "SilentWallCheck",
-    Callback = function(Value)
-        cfg.WallCheck = Value
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Team Check",
-    CurrentValue = false,
-    Flag = "SilentTeamCheck",
-    Callback = function(Value)
-        cfg.TeamCheck = Value
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Prediction",
-    CurrentValue = false,
-    Flag = "SilentPrediction",
-    Callback = function(Value)
-        cfg.Prediction = Value
-    end,
-})
-
-MainTab:CreateSlider({
-    Name = "Prediction Amount",
-    Range = {0, 0.5},
-    Increment = 0.01,
-    CurrentValue = 0.15,
-    Flag = "SilentPredictionAmount",
-    Callback = function(Value)
-        cfg.PredictionAmount = Value
-    end,
-})
-
-MainTab:CreateToggle({
-    Name = "Snapline",
-    CurrentValue = true,
-    Flag = "SilentSnapline",
-    Callback = function(Value)
-        cfg.ShowSnapline = Value
-    end,
-})
-
-local COLOR_BOX      = Color3.fromRGB(0, 255, 80)
-local COLOR_TRACER   = Color3.fromRGB(0, 255, 80)
-local COLOR_HEALTH   = Color3.fromRGB(0, 255, 0)
+local COLOR_BOX = Color3.fromRGB(0, 255, 80)
+local COLOR_TRACER = Color3.fromRGB(0, 255, 80)
+local COLOR_HEALTH = Color3.fromRGB(0, 255, 0)
 local COLOR_SKELETON = Color3.fromRGB(255, 255, 255)
-local COLOR_CHAMS    = Color3.fromRGB(255, 40, 40)
-local COLOR_NAME     = Color3.fromRGB(0, 255, 80)
+local COLOR_CHAMS = Color3.fromRGB(255, 40, 40)
+local COLOR_NAME = Color3.fromRGB(0, 255, 80)
 
 local ESPSettings = {
-    Enabled = false,
-    BoxESP = false,
-    BoxStyle = "Corner",
-    BoxThickness = 1,
-    TracerESP = false,
-    TracerOrigin = "Bottom",
-    TracerThickness = 1,
-    HealthESP = false,
-    HealthStyle = "Bar",
-    HealthTextSuffix = "HP",
-    NameESP = false,
-    ShowDistance = true,
-    TextSize = 14,
-    TextFont = 2,
-    MaxDistance = 1000,
-    RefreshRate = 1 / 144,
-    ChamsEnabled = false,
-    ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
-    ChamsFillColor = COLOR_CHAMS,
-    ChamsTransparency = 0.5,
-    ChamsOutlineTransparency = 0,
-    SkeletonESP = false,
-    SkeletonColor = COLOR_SKELETON,
-    SkeletonThickness = 1.5,
-    SkeletonTransparency = 1,
+    Enabled = false, BoxESP = false, BoxStyle = "Corner", BoxThickness = 1,
+    TracerESP = false, TracerOrigin = "Bottom", TracerThickness = 1,
+    HealthESP = false, HealthStyle = "Bar", HealthTextSuffix = "HP",
+    NameESP = false, ShowDistance = true, TextSize = 14, TextFont = 2,
+    MaxDistance = 1000, RefreshRate = 1 / 144,
+    ChamsEnabled = false, ChamsOutlineColor = Color3.fromRGB(255, 255, 255),
+    ChamsFillColor = COLOR_CHAMS, ChamsTransparency = 0.5, ChamsOutlineTransparency = 0,
+    SkeletonESP = false, SkeletonColor = COLOR_SKELETON, SkeletonThickness = 1.5, SkeletonTransparency = 1,
 }
 
 local Drawings = { ESP = {}, Skeleton = {} }
@@ -327,42 +218,29 @@ local function HideAllESP(esp, player)
         for _, obj in pairs(esp.Info) do obj.Visible = false end
     end
     local sk = Drawings.Skeleton[player]
-    if sk then
-        for _, l in pairs(sk) do l.Visible = false end
-    end
-    if Highlights[player] then
-        Highlights[player].Enabled = false
-    end
+    if sk then for _, l in pairs(sk) do l.Visible = false end end
+    if Highlights[player] then Highlights[player].Enabled = false end
 end
 
 local function CreateESP(player)
     if player == LocalPlayer then return end
-
     local box = {
-        TopLeft = Drawing.new("Line"),
-        TopRight = Drawing.new("Line"),
-        BottomLeft = Drawing.new("Line"),
-        BottomRight = Drawing.new("Line"),
-        Left = Drawing.new("Line"),
-        Right = Drawing.new("Line"),
-        Top = Drawing.new("Line"),
-        Bottom = Drawing.new("Line"),
+        TopLeft = Drawing.new("Line"), TopRight = Drawing.new("Line"),
+        BottomLeft = Drawing.new("Line"), BottomRight = Drawing.new("Line"),
+        Left = Drawing.new("Line"), Right = Drawing.new("Line"),
+        Top = Drawing.new("Line"), Bottom = Drawing.new("Line"),
     }
     for _, line in pairs(box) do
         line.Visible = false
         line.Color = COLOR_BOX
         line.Thickness = ESPSettings.BoxThickness
     end
-
     local tracer = Drawing.new("Line")
     tracer.Visible = false
     tracer.Color = COLOR_TRACER
     tracer.Thickness = ESPSettings.TracerThickness
-
     local healthBar = {
-        Outline = Drawing.new("Square"),
-        Fill = Drawing.new("Square"),
-        Text = Drawing.new("Text"),
+        Outline = Drawing.new("Square"), Fill = Drawing.new("Square"), Text = Drawing.new("Text"),
     }
     healthBar.Outline.Visible = false
     healthBar.Fill.Visible = false
@@ -372,11 +250,7 @@ local function CreateESP(player)
     healthBar.Text.Size = ESPSettings.TextSize
     healthBar.Text.Font = ESPSettings.TextFont
     healthBar.Text.Color = COLOR_HEALTH
-
-    local info = {
-        Name = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-    }
+    local info = { Name = Drawing.new("Text"), Distance = Drawing.new("Text") }
     for _, text in pairs(info) do
         text.Visible = false
         text.Center = true
@@ -385,7 +259,6 @@ local function CreateESP(player)
         text.Font = ESPSettings.TextFont
         text.Outline = true
     end
-
     local highlight = Instance.new("Highlight")
     highlight.FillColor = COLOR_CHAMS
     highlight.OutlineColor = ESPSettings.ChamsOutlineColor
@@ -394,13 +267,9 @@ local function CreateESP(player)
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Enabled = false
     Highlights[player] = highlight
-
     local skeleton = {
-        Head = Drawing.new("Line"),
-        LeftShoulder = Drawing.new("Line"),
-        RightShoulder = Drawing.new("Line"),
-        LeftHip = Drawing.new("Line"),
-        RightHip = Drawing.new("Line"),
+        Head = Drawing.new("Line"), LeftShoulder = Drawing.new("Line"), RightShoulder = Drawing.new("Line"),
+        LeftHip = Drawing.new("Line"), RightHip = Drawing.new("Line"),
     }
     for _, line in pairs(skeleton) do
         line.Visible = false
@@ -409,13 +278,7 @@ local function CreateESP(player)
         line.Transparency = ESPSettings.SkeletonTransparency
     end
     Drawings.Skeleton[player] = skeleton
-
-    Drawings.ESP[player] = {
-        Box = box,
-        Tracer = tracer,
-        HealthBar = healthBar,
-        Info = info,
-    }
+    Drawings.ESP[player] = { Box = box, Tracer = tracer, HealthBar = healthBar, Info = info }
 end
 
 local function RemoveESP(player)
@@ -440,42 +303,34 @@ end
 
 local function GetTracerOrigin()
     local origin = ESPSettings.TracerOrigin
-    if origin == "Bottom" then
-        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-    elseif origin == "Top" then
-        return Vector2.new(Camera.ViewportSize.X / 2, 0)
-    elseif origin == "Mouse" then
-        return UserInputService:GetMouseLocation()
-    else
-        return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    end
+    if origin == "Bottom" then return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+    elseif origin == "Top" then return Vector2.new(Camera.ViewportSize.X / 2, 0)
+    elseif origin == "Mouse" then return UserInputService:GetMouseLocation()
+    else return Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2) end
 end
 
 local function UpdateESP(player)
     local esp = Drawings.ESP[player]
     if not esp then return end
-
     local character = player.Character
-    if not character or not ESPSettings.Enabled then
+    if not character or not ESPSettings.Enabled then HideAllESP(esp, player) return end
+    if player:GetAttribute("IsEliminated") == true then
         HideAllESP(esp, player)
         return
     end
-
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not rootPart or not humanoid or humanoid.Health <= 0 then
         HideAllESP(esp, player)
         return
     end
-
-    local pos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
-    local distance = (rootPart.Position - Camera.CFrame.Position).Magnitude
-
-    if not onScreen or pos.Z <= 0 or distance > ESPSettings.MaxDistance then
+    if humanoid:GetState() == Enum.HumanoidStateType.Dead then
         HideAllESP(esp, player)
         return
     end
-
+    local pos, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+    local distance = (rootPart.Position - Camera.CFrame.Position).Magnitude
+    if not onScreen or pos.Z <= 0 or distance > ESPSettings.MaxDistance then HideAllESP(esp, player) return end
     local size = character:GetExtentsSize()
     local cf = rootPart.CFrame
     local top = Camera:WorldToViewportPoint((cf * CFrame.new(0, size.Y / 2, 0)).Position)
@@ -484,9 +339,7 @@ local function UpdateESP(player)
     local boxWidth = screenSize * 0.65
     local boxPosition = Vector2.new(top.X - boxWidth / 2, top.Y)
     local boxSize = Vector2.new(boxWidth, screenSize)
-
     for _, obj in pairs(esp.Box) do obj.Visible = false end
-
     if ESPSettings.BoxESP then
         if ESPSettings.BoxStyle == "Corner" then
             local cs = boxWidth * 0.2
@@ -527,7 +380,6 @@ local function UpdateESP(player)
             end
         end
     end
-
     if ESPSettings.TracerESP then
         esp.Tracer.From = GetTracerOrigin()
         esp.Tracer.To = Vector2.new(pos.X, pos.Y)
@@ -536,7 +388,6 @@ local function UpdateESP(player)
     else
         esp.Tracer.Visible = false
     end
-
     if ESPSettings.HealthESP then
         local hp = humanoid.Health / math.max(humanoid.MaxHealth, 1)
         local barH = screenSize * 0.8
@@ -560,12 +411,9 @@ local function UpdateESP(player)
     else
         for _, obj in pairs(esp.HealthBar) do obj.Visible = false end
     end
-
     if ESPSettings.NameESP then
         local text = player.DisplayName
-        if ESPSettings.ShowDistance then
-            text = text .. " [" .. math.floor(distance) .. "]"
-        end
+        if ESPSettings.ShowDistance then text = text .. " [" .. math.floor(distance) .. "]" end
         esp.Info.Name.Text = text
         esp.Info.Name.Position = Vector2.new(boxPosition.X + boxWidth / 2, boxPosition.Y - 18)
         esp.Info.Name.Color = COLOR_NAME
@@ -573,7 +421,6 @@ local function UpdateESP(player)
     else
         esp.Info.Name.Visible = false
     end
-
     local highlight = Highlights[player]
     if highlight then
         if ESPSettings.ChamsEnabled then
@@ -587,20 +434,13 @@ local function UpdateESP(player)
             highlight.Enabled = false
         end
     end
-
     local sk = Drawings.Skeleton[player]
     if sk and ESPSettings.SkeletonESP then
         local function bone(a, b, line)
-            if not a or not b or not line then
-                if line then line.Visible = false end
-                return
-            end
+            if not a or not b or not line then if line then line.Visible = false end return end
             local s1, v1 = Camera:WorldToViewportPoint(a.Position)
             local s2, v2 = Camera:WorldToViewportPoint(b.Position)
-            if not v1 or not v2 or s1.Z <= 0 or s2.Z <= 0 then
-                line.Visible = false
-                return
-            end
+            if not v1 or not v2 or s1.Z <= 0 or s2.Z <= 0 then line.Visible = false return end
             line.From = Vector2.new(s1.X, s1.Y)
             line.To = Vector2.new(s2.X, s2.Y)
             line.Color = COLOR_SKELETON
@@ -624,17 +464,13 @@ local function UpdateESP(player)
 end
 
 local function CleanupESP()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        RemoveESP(plr)
-    end
+    for _, plr in ipairs(Players:GetPlayers()) do RemoveESP(plr) end
 end
 
 local lastESPUpdate = 0
 RunService.RenderStepped:Connect(function()
     if not ESPSettings.Enabled then
-        for plr, esp in pairs(Drawings.ESP) do
-            HideAllESP(esp, plr)
-        end
+        for plr, esp in pairs(Drawings.ESP) do HideAllESP(esp, plr) end
         return
     end
     local now = tick()
@@ -652,141 +488,29 @@ Players.PlayerAdded:Connect(CreateESP)
 Players.PlayerRemoving:Connect(RemoveESP)
 
 EspTab:CreateSection("ESP")
+EspTab:CreateToggle({ Name = "Enable ESP", CurrentValue = false, Flag = "ESPEnabled", Callback = function(Value) ESPSettings.Enabled = Value if not Value then CleanupESP() end end })
+EspTab:CreateToggle({ Name = "Box ESP", CurrentValue = false, Flag = "ESPBox", Callback = function(Value) ESPSettings.BoxESP = Value end })
+EspTab:CreateDropdown({ Name = "Box Style", Options = {"Corner", "Full"}, CurrentOption = {"Corner"}, MultipleOptions = false, Flag = "ESPBoxStyle", Callback = function(Value) ESPSettings.BoxStyle = Value[1] end })
+EspTab:CreateToggle({ Name = "Name ESP", CurrentValue = false, Flag = "ESPName", Callback = function(Value) ESPSettings.NameESP = Value end })
+EspTab:CreateToggle({ Name = "Health ESP", CurrentValue = false, Flag = "ESPHealth", Callback = function(Value) ESPSettings.HealthESP = Value end })
+EspTab:CreateToggle({ Name = "Tracers", CurrentValue = false, Flag = "ESPTracer", Callback = function(Value) ESPSettings.TracerESP = Value end })
+EspTab:CreateDropdown({ Name = "Tracer Origin", Options = {"Bottom", "Top", "Mouse", "Center"}, CurrentOption = {"Bottom"}, MultipleOptions = false, Flag = "ESPTracerOrigin", Callback = function(Value) ESPSettings.TracerOrigin = Value[1] end })
+EspTab:CreateToggle({ Name = "Skeleton", CurrentValue = false, Flag = "ESPSkeleton", Callback = function(Value) ESPSettings.SkeletonESP = Value end })
+EspTab:CreateToggle({ Name = "Chams", CurrentValue = false, Flag = "ESPChams", Callback = function(Value) ESPSettings.ChamsEnabled = Value end })
+EspTab:CreateSlider({ Name = "Max Distance", Range = {100, 5000}, Increment = 50, CurrentValue = 1000, Flag = "ESPMaxDistance", Callback = function(Value) ESPSettings.MaxDistance = Value end })
 
-EspTab:CreateToggle({
-    Name = "Enable ESP",
-    CurrentValue = false,
-    Flag = "ESPEnabled",
-    Callback = function(Value)
-        ESPSettings.Enabled = Value
-        if not Value then CleanupESP() end
-    end,
-})
-
-EspTab:CreateToggle({
-    Name = "Box ESP",
-    CurrentValue = false,
-    Flag = "ESPBox",
-    Callback = function(Value)
-        ESPSettings.BoxESP = Value
-    end,
-})
-
-EspTab:CreateDropdown({
-    Name = "Box Style",
-    Options = {"Corner", "Full"},
-    CurrentOption = {"Corner"},
-    MultipleOptions = false,
-    Flag = "ESPBoxStyle",
-    Callback = function(Value)
-        ESPSettings.BoxStyle = Value[1]
-    end,
-})
-
-EspTab:CreateToggle({
-    Name = "Name ESP",
-    CurrentValue = false,
-    Flag = "ESPName",
-    Callback = function(Value)
-        ESPSettings.NameESP = Value
-    end,
-})
-
-EspTab:CreateToggle({
-    Name = "Health ESP",
-    CurrentValue = false,
-    Flag = "ESPHealth",
-    Callback = function(Value)
-        ESPSettings.HealthESP = Value
-    end,
-})
-
-EspTab:CreateToggle({
-    Name = "Tracers",
-    CurrentValue = false,
-    Flag = "ESPTracer",
-    Callback = function(Value)
-        ESPSettings.TracerESP = Value
-    end,
-})
-
-EspTab:CreateDropdown({
-    Name = "Tracer Origin",
-    Options = {"Bottom", "Top", "Mouse", "Center"},
-    CurrentOption = {"Bottom"},
-    MultipleOptions = false,
-    Flag = "ESPTracerOrigin",
-    Callback = function(Value)
-        ESPSettings.TracerOrigin = Value[1]
-    end,
-})
-
-EspTab:CreateToggle({
-    Name = "Skeleton",
-    CurrentValue = false,
-    Flag = "ESPSkeleton",
-    Callback = function(Value)
-        ESPSettings.SkeletonESP = Value
-    end,
-})
-
-EspTab:CreateToggle({
-    Name = "Chams",
-    CurrentValue = false,
-    Flag = "ESPChams",
-    Callback = function(Value)
-        ESPSettings.ChamsEnabled = Value
-    end,
-})
-
-EspTab:CreateSlider({
-    Name = "Max Distance",
-    Range = {100, 5000},
-    Increment = 50,
-    CurrentValue = 1000,
-    Flag = "ESPMaxDistance",
-    Callback = function(Value)
-        ESPSettings.MaxDistance = Value
-    end,
-})
-
-getgenv().SplitSecond = {
-    Enabled = false,
-    ErrorAmount = 0,
-}
-
+getgenv().SplitSecond = { Enabled = false, ErrorAmount = 0 }
 local SS = getgenv().SplitSecond
 local targetTime, startTimestamp, speed = nil, nil, 1
 local simonSaid, pressed, ssConnection = false, false, nil
 
 local function stopLoop()
-    if ssConnection then
-        ssConnection:Disconnect()
-        ssConnection = nil
-    end
+    if ssConnection then ssConnection:Disconnect() ssConnection = nil end
 end
 
 OtherTab:CreateSection("Split Second")
-
-OtherTab:CreateToggle({
-    Name = "Split Second Auto",
-    CurrentValue = false,
-    Flag = "SplitSecondEnabled",
-    Callback = function(Value)
-        SS.Enabled = Value
-        if not Value then stopLoop() end
-    end,
-})
-
-OtherTab:CreateInput({
-    Name = "Error (5 = 0.05)",
-    CurrentValue = "0",
-    PlaceholderText = "0",
-    Flag = "SplitError",
-    Callback = function(Value)
-        SS.ErrorAmount = tonumber(Value) or 0
-    end,
-})
+OtherTab:CreateToggle({ Name = "Split Second Auto", CurrentValue = false, Flag = "SplitSecondEnabled", Callback = function(Value) SS.Enabled = Value if not Value then stopLoop() end end })
+OtherTab:CreateInput({ Name = "Error (5 = 0.05)", CurrentValue = "0", PlaceholderText = "0", Flag = "SplitError", Callback = function(Value) SS.ErrorAmount = tonumber(Value) or 0 end })
 
 local function parseTarget(text)
     if type(text) ~= "string" then return nil end
@@ -795,11 +519,16 @@ local function parseTarget(text)
         or string.find(upper, "BEST SO FAR", 1, true)
         or string.find(upper, "LOCKED", 1, true)
         or string.find(upper, "TOO EARLY", 1, true)
-        or string.find(upper, "TOO LATE", 1, true) then
+        or string.find(upper, "TOO LATE", 1, true)
+        or string.find(upper, "WAIT FOR YOUR TURN", 1, true)
+        or string.find(upper, "YOUR TURN", 1, true)
+        or string.find(upper, "OPPONENT", 1, true)
+        or string.find(upper, "SIMON DID", 1, true) then
         return nil
     end
     local num = string.match(upper, "STOP THE CLOCK AT%s*(%d+%.?%d*)")
         or string.match(upper, "STOP AT%s*(%d+%.?%d*)")
+        or string.match(upper, "AT%s*(%d+%.?%d*)")
     return num and tonumber(num) or nil
 end
 
@@ -812,16 +541,11 @@ end
 local function startLoop(TimeClock)
     stopLoop()
     if not SS.Enabled or not simonSaid or not targetTime or not startTimestamp then return end
-
     local err = math.abs(tonumber(SS.ErrorAmount) or 0) / 100
     local signed = (math.random() > 0.5 and 1 or -1) * err
     local need = targetTime + signed
-
     ssConnection = RunService.Heartbeat:Connect(function()
-        if not SS.Enabled or pressed or not simonSaid then
-            stopLoop()
-            return
-        end
+        if not SS.Enabled or pressed or not simonSaid then stopLoop() return end
         local current = (workspace:GetServerTimeNow() - startTimestamp) * speed
         if current >= need then
             doPress(TimeClock)
@@ -830,24 +554,11 @@ local function startLoop(TimeClock)
     end)
 end
 
-task.spawn(function()
-    local ok, TimeClock = pcall(function()
-        return game:GetService("ReplicatedStorage")
-            :WaitForChild("Remotes", 15)
-            :WaitForChild("Lobby", 15)
-            :WaitForChild("TimeClock", 15)
-    end)
-
-    if not ok or not TimeClock then
-        return
-    end
-
+local function bindTimeClock(TimeClock)
     TimeClock.OnClientEvent:Connect(function(action, a, b, c, d, e)
         if action == "sub" then
             local parsed = parseTarget(tostring(a))
-            if parsed then
-                targetTime = parsed
-            end
+            if parsed then targetTime = parsed end
         elseif action == "begin" then
             simonSaid = (b == true)
             startTimestamp = typeof(c) == "number" and c or nil
@@ -864,16 +575,123 @@ task.spawn(function()
         elseif action == "result" or action == "end" or action == "clockstop" or action == "watchend" then
             stopLoop()
             pressed = false
-            if action == "result" or action == "end" then
-                targetTime = nil
+            if action == "result" or action == "end" then targetTime = nil end
+        end
+    end)
+end
+
+task.spawn(function()
+    local Remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes", 20)
+    if not Remotes then return end
+    local TimeClock = nil
+    local ok1, res1 = pcall(function()
+        return Remotes:WaitForChild("Game", 5):WaitForChild("TimeClock", 10)
+    end)
+    if ok1 and res1 then
+        TimeClock = res1
+    else
+        local ok2, res2 = pcall(function()
+            return Remotes:WaitForChild("Lobby", 5):WaitForChild("TimeClock", 10)
+        end)
+        if ok2 and res2 then TimeClock = res2 end
+    end
+    if TimeClock then bindTimeClock(TimeClock) end
+end)
+
+getgenv().Misc = { AntiRagdoll = false, PickupNoCD = false }
+local Misc = getgenv().Misc
+
+OtherTab:CreateSection("Misc")
+
+local antiRagdollConn = nil
+local function stopAntiRagdoll()
+    if antiRagdollConn then antiRagdollConn:Disconnect() antiRagdollConn = nil end
+end
+
+local function startAntiRagdoll()
+    stopAntiRagdoll()
+    antiRagdollConn = RunService.Heartbeat:Connect(function()
+        if not Misc.AntiRagdoll then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then return end
+        hum.PlatformStand = false
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+        local state = hum:GetState()
+        if state == Enum.HumanoidStateType.Physics or state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown then
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end
+        for _, desc in ipairs(char:GetDescendants()) do
+            if desc:IsA("Motor6D") and not desc.Enabled then
+                desc.Enabled = true
+            elseif desc:IsA("BallSocketConstraint") and (desc.Name == "RagdollBallSocket" or string.find(desc.Name, "Ragdoll")) then
+                desc:Destroy()
+            elseif desc:IsA("NoCollisionConstraint") and desc.Name == "RagdollNoCollision" then
+                desc:Destroy()
+            elseif desc:IsA("AnimationConstraint") then
+                desc:Destroy()
             end
         end
     end)
-end)
+end
 
-Rayfield:Notify({
-    Title = "Frozent0",
-    Content = "Loaded",
-    Duration = 3,
-    Image = 4483362458,
+OtherTab:CreateToggle({
+    Name = "Anti Ragdoll", CurrentValue = false, Flag = "AntiRagdoll",
+    Callback = function(Value)
+        Misc.AntiRagdoll = Value
+        if Value then startAntiRagdoll() else stopAntiRagdoll() end
+    end,
 })
+
+local promptConnections = {}
+local function stripPrompt(prompt)
+    if not prompt:IsA("ProximityPrompt") then return end
+    pcall(function()
+        prompt.HoldDuration = 0
+        prompt.RequiresLineOfSight = false
+    end)
+end
+
+local function applyAllPrompts()
+    for _, desc in ipairs(workspace:GetDescendants()) do stripPrompt(desc) end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            for _, desc in ipairs(plr.Character:GetDescendants()) do stripPrompt(desc) end
+        end
+    end
+end
+
+local function startPickupNoCD()
+    for _, c in ipairs(promptConnections) do pcall(function() c:Disconnect() end) end
+    promptConnections = {}
+    applyAllPrompts()
+    table.insert(promptConnections, workspace.DescendantAdded:Connect(function(desc)
+        if Misc.PickupNoCD then stripPrompt(desc) end
+    end))
+    table.insert(promptConnections, RunService.Heartbeat:Connect(function()
+        if not Misc.PickupNoCD then return end
+        for _, desc in ipairs(workspace:GetDescendants()) do
+            if desc:IsA("ProximityPrompt") and desc.HoldDuration > 0 then
+                desc.HoldDuration = 0
+            end
+        end
+    end))
+end
+
+local function stopPickupNoCD()
+    for _, c in ipairs(promptConnections) do pcall(function() c:Disconnect() end) end
+    promptConnections = {}
+end
+
+OtherTab:CreateToggle({
+    Name = "Pick up No CD", CurrentValue = false, Flag = "PickupNoCD",
+    Callback = function(Value)
+        Misc.PickupNoCD = Value
+        if Value then startPickupNoCD() else stopPickupNoCD() end
+    end,
+})
+
+Rayfield:Notify({ Title = "Frozent0", Content = "Loaded", Duration = 3, Image = 4483362458 })
