@@ -102,6 +102,21 @@ local function getOrigin()
     return Camera.CFrame.Position
 end
 
+local function getViewOrigin()
+    local char = LocalPlayer.Character
+    if char then
+        local head = char:FindFirstChild("Head")
+        if head then
+            return head.Position
+        end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            return hrp.Position + Vector3.new(0, 1.5, 0)
+        end
+    end
+    return Camera.CFrame.Position
+end
+
 local function fovToPixels()
     local vh = Camera.ViewportSize.Y
     return (cfg.FOV / math.max(Camera.FieldOfView, 1)) * (vh * 0.5)
@@ -109,17 +124,34 @@ end
 
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.IgnoreWater = true
 
-local function hasWall(fromPos, toPos, targetChar)
+local function hasWall(handPos, toPos, targetChar)
     if not cfg.WallCheck then
         return false
     end
+
     local filter = { LocalPlayer.Character, Camera }
     if targetChar then
         table.insert(filter, targetChar)
     end
     rayParams.FilterDescendantsInstances = filter
-    return workspace:Raycast(fromPos, toPos - fromPos, rayParams) ~= nil
+
+    local viewOrigin = getViewOrigin()
+    if workspace:Raycast(viewOrigin, toPos - viewOrigin, rayParams) ~= nil then
+        return true
+    end
+
+    local back = viewOrigin - handPos
+    local startPos = handPos
+    if back.Magnitude > 0.05 then
+        startPos = handPos + back.Unit * math.min(1.25, back.Magnitude)
+    end
+    if workspace:Raycast(startPos, toPos - startPos, rayParams) ~= nil then
+        return true
+    end
+
+    return false
 end
 
 local cachedPart, cachedScreen = nil, nil
