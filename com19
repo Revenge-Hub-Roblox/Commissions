@@ -1,3 +1,5 @@
+--full opensource
+
 local Environment = getgenv()
 local PreviousRuntime = Environment.ParsaRuntime
 if type(PreviousRuntime) == "table" and typeof(PreviousRuntime.Unload) == "function" then
@@ -16,14 +18,13 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local Camera = Workspace.CurrentCamera
 
-
 Environment.ParsaAutofarmEnabled = Environment.ParsaAutofarmEnabled ~= false
 Environment.ParsaTeam = Environment.ParsaTeam or "Counter-Terrorists"
 Environment.ParsaAutoJoinDeathmatch = Environment.ParsaAutoJoinDeathmatch ~= false
-Environment.ParsaAutoBuyCase = Environment.ParsaAutoBuyCase or false
-Environment.ParsaAutoOpenCase = Environment.ParsaAutoOpenCase or false
-Environment.ParsaBuyCaseName = Environment.ParsaBuyCaseName
-Environment.ParsaOpenCaseName = Environment.ParsaOpenCaseName
+Environment.ParsaAutoBuyCase = Environment.ParsaAutoBuyCase ~= true
+Environment.ParsaAutoOpenCase = Environment.ParsaAutoOpenCase ~= false
+Environment.ParsaBuyCaseName = Environment.ParsaBuyCaseName or "Viridian Case"
+Environment.ParsaOpenCaseName = Environment.ParsaOpenCaseName or "Viridian Case"
 Environment.ParsaCasePrices = Environment.ParsaCasePrices or {}
 Environment.ParsaCaseNameExceptions = Environment.ParsaCaseNameExceptions or {
     "chrysalis", "charm pack", "lionheart",
@@ -76,7 +77,6 @@ local stats = {
     bulletsSent = 0,
     rayRetarget = 0,
     sendRetarget = 0,
-    sendChain = 0,
     sendChainUnhooked = 0,
     sendClean = 0,
     dmgAny = 0,
@@ -87,7 +87,6 @@ local stats = {
     scanOK = 0,
     scanSkipped = 0,
 }
-
 
 local logThrottle = {}
 local function tlog(tag, minInterval, ...)
@@ -251,7 +250,6 @@ local function updateSilentTarget(now)
     Environment.ParsaSilentTargetInfo = best
 end
 
--- ЛИНИЯ 1: редирект на уровне _performRaycast
 local function redirectBulletResult(returns)
     if not Runtime.Alive or Environment.ParsaAutofarmEnabled ~= true then return end
     lastRayRetargetAt = os.clock()
@@ -337,7 +335,6 @@ local function redirectBulletResult(returns)
         stats.rayRetarget += 1
     end)
 end
-
 
 local function getBalance(names)
     for _, n in ipairs(names) do
@@ -1105,9 +1102,7 @@ if WindUI then
         Window = nil
     end
 end
--- ===================================================
 
--- ==================== СТРЕЛЬБА ПО РЕМОУТАМ ====================
 local weaponCache = nil
 local lastWeaponScan = 0
 local lastShotAt = 0
@@ -1628,7 +1623,6 @@ local function remoteShoot(now)
     end
 end
 
-
 local payloadRayParams = RaycastParams.new()
 payloadRayParams.FilterType = Enum.RaycastFilterType.Exclude
 payloadRayParams.IgnoreWater = true
@@ -1740,9 +1734,6 @@ local function redirectPayloadBullets(payload)
                     end
                 end
             else
-                -- [FINAL FIX] пуля не в цели: ВСЕГДА строим собственную цепочку
-                -- рейкастом Origin->цель (надёжнее ретаргета: покрывает нехукнутые
-                -- классы, переходные состояния reload, ленивые Bullet-классы)
                 local delta = targetPart.Position - origin
                 local length = delta.Magnitude
                 if length > 0.001 then
@@ -1860,7 +1851,6 @@ task.spawn(function()
     end
 end)
 
--- статистика урона
 task.spawn(function()
     local ok, remote = pcall(function()
         return ReplicatedStorage:WaitForChild("NetworkRemotes", 20)
@@ -1931,7 +1921,6 @@ Environment.ParsaDebugWeapons = function()
     return #list
 end
 
-
 renderConnection = RunService.RenderStepped:Connect(function()
     if not Runtime.Alive then return end
     local now = os.clock()
@@ -2001,7 +1990,6 @@ unloadScript = function()
 end
 Runtime.Unload = unloadScript
 
-
 task.spawn(function()
     if typeof(getgc) ~= "function" then
         warn("Auto farm requires getgc")
@@ -2047,7 +2035,6 @@ task.spawn(function()
         if Runtime.Alive then scanAndHookAll() end
     end
 end)
-
 
 task.spawn(function()
     if typeof(getgc) ~= "function" then return end
@@ -2101,7 +2088,6 @@ task.spawn(function()
         end
     end)
 end)
-
 
 task.spawn(function()
     if typeof(getgc) ~= "function" then return end
@@ -2216,7 +2202,6 @@ task.spawn(function()
     end
 end)
 
-
 task.spawn(function()
     local function initialScan()
         for _, key in ipairs({ "Inventory", "inventory", "InventoryItems", "Items" }) do
@@ -2321,7 +2306,6 @@ task.spawn(function()
     end
 end)
 
-
 Environment.ParsaPurchaseCase = function(name, amount) return purchaseCase(name, amount) end
 Environment.ParsaOpenCase = function(name) return openCase(name) end
 Environment.ParsaCollectCaseIdentifiers = function(name, want) return collectCaseIdentifiers(name, want) end
@@ -2361,20 +2345,14 @@ Environment.ParsaDebug = function()
     print("======================")
 end
 
--- Цикл: авто-покупка кейса и авто-открытие
 task.spawn(function()
-    local warnedNoBuy, warnedNoOpen = false, false
     while Runtime.Alive do
         task.wait(5)
         if Environment.ParsaAutoBuyCase then
             local name = Environment.ParsaBuyCaseName
             if not name or name == "..." then
-                if not warnedNoBuy then
-                    warn("[Frozent] Auto Buy включён, но кейс не выбран")
-                    warnedNoBuy = true
-                end
+                tlog("CASEBUY", 30, "кейс для покупки не выбран")
             else
-                warnedNoBuy = false
                 local price = getCasePrice(name)
                 local credits = getCredits()
                 if not price then
@@ -2395,12 +2373,8 @@ task.spawn(function()
         if Environment.ParsaAutoOpenCase then
             local name = Environment.ParsaOpenCaseName
             if not name or name == "..." then
-                if not warnedNoOpen then
-                    warn("[Frozent] Auto Open включён, но кейс не выбран")
-                    warnedNoOpen = true
-                end
+                tlog("CASEOPEN", 30, "кейс для открытия не выбран")
             else
-                warnedNoOpen = false
                 if openCase(name) then
                     task.wait(8)
                 else
@@ -2410,7 +2384,6 @@ task.spawn(function()
         end
     end
 end)
-
 
 local SELECT_TEAM_HEADER = { 1, 40, 181, 47, 253, 32, 23, 185, 0, 0, 4 }
 local PRESSED_PLAY_PACKET = bytesToBuffer({ 1, 40, 181, 47, 253, 32, 1, 9, 0, 0, 0 })
@@ -2569,7 +2542,6 @@ task.spawn(function()
         rejoinIfNeeded()
     end
 end)
-
 
 respawnConn = LocalPlayer.CharacterAdded:Connect(function()
     weaponCache = nil
