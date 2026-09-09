@@ -23,7 +23,6 @@ if not VIP_CODE then
     return
 end
 
-print("[AutoJoin] Account:", LP.Name, "| VIP:", VIP_CODE)
 
 if game.PlaceId == MAIN_PLACE then
     getgenv().NovaHub = NOVA_SETTINGS
@@ -46,7 +45,6 @@ local function fireChooseType()
         return false
     end
 
-    print("[AutoJoin] Firing chooseType true x6")
     for i = 1, 6 do
         pcall(function()
             remote:FireServer(true)
@@ -76,7 +74,6 @@ if PlayerGui:FindFirstChild("chooseType") then
     print("[AutoJoin] chooseType already open → firing immediately")
     fireChooseType()
 else
-    -- Случай 2: меню ещё нет
     print("[AutoJoin] chooseType not found → sending code + waiting")
 
     sendVipCode()
