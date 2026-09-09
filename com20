@@ -23,10 +23,28 @@ local PlayerGui = LP:WaitForChild("PlayerGui")
 
 if QUEUE_ON_TELEPORT then
     local SCRIPT_URL = "https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com20"
-    queue_on_teleport([[
-        getgenv().GPO_AutoJoin = getgenv().GPO_AutoJoin or {}
-        loadstring(game:HttpGet("]] .. SCRIPT_URL .. [[") )()
-    ]])
+
+    local configStr = "getgenv().GPO_AutoJoin = {"
+
+    configStr = configStr .. "Accounts={"
+    for name, code in pairs(ACCOUNTS) do
+        configStr = configStr .. string.format('["%s"]="%s",', name, code)
+    end
+    configStr = configStr .. "},"
+
+    configStr = configStr .. "NovaHub={"
+    configStr = configStr .. string.format('DiscordWebHook="%s",', tostring(NOVA_SETTINGS.DiscordWebHook or ""))
+    configStr = configStr .. string.format("Optimized=%s,", tostring(NOVA_SETTINGS.Optimized))
+    configStr = configStr .. string.format("LockFPS=%s,", tostring(NOVA_SETTINGS.LockFPS))
+    configStr = configStr .. string.format("FpsCap=%s,", tostring(NOVA_SETTINGS.FpsCap or 60))
+    configStr = configStr .. "},"
+
+    configStr = configStr .. "QueueOnTeleport=" .. tostring(QUEUE_ON_TELEPORT)
+    configStr = configStr .. "};"
+
+    local fullCode = configStr .. '\nloadstring(game:HttpGet("' .. SCRIPT_URL .. '"))()'
+
+    queue_on_teleport(fullCode)
 end
 
 local VIP_CODE = ACCOUNTS[LP.Name]
@@ -121,7 +139,4 @@ task.spawn(function()
             sendVipCode()
         end
     end
-end)
-
-TeleportService.TeleportInitFailed:Connect(function(p, result, err)
 end)
