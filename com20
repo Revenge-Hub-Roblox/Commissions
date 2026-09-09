@@ -1,0 +1,121 @@
+
+
+local VIP_CODE = "RmSripOT1k"
+local LOBBY_PLACE = 1730877806
+local MAIN_PLACE  = 3978370137
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+
+local LP = Players.LocalPlayer
+local PlayerGui = LP:WaitForChild("PlayerGui")
+
+
+if game.PlaceId == MAIN_PLACE then
+    getgenv().NovaHub = {
+        DiscordWebHook = "",
+        Optimized = false,
+        LockFPS = true,
+        FpsCap = 60,
+    }
+    loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/6d1d42f1a622306f0c177c220a85ef47.lua"))()
+    return
+end
+
+if game.PlaceId ~= LOBBY_PLACE then return end
+
+print("[AutoJoin] Lobby detected")
+
+local function fireChooseType()
+    local chooseType = PlayerGui:FindFirstChild("chooseType")
+    if not chooseType then return false end
+
+    local remote = chooseType:FindFirstChild("RemoteEvent", true)
+    if not remote then
+        warn("[AutoJoin] chooseType found but no RemoteEvent")
+        return false
+    end
+
+    print("[AutoJoin] Firing chooseType true x6")
+    for i = 1, 6 do
+        pcall(function()
+            remote:FireServer(true)
+        end)
+        task.wait(0.18)
+    end
+    return true
+end
+
+local function sendVipCode()
+    local reserved = ReplicatedStorage:FindFirstChild("Events") 
+                  and ReplicatedStorage.Events:FindFirstChild("reserved")
+    if not reserved then
+        warn("[AutoJoin] reserved remote not found")
+        return
+    end
+
+    print("[AutoJoin] Sending VIP code...")
+    -- Не ждём результат (чтобы не зависать)
+    task.spawn(function()
+        pcall(function()
+            reserved:InvokeServer(VIP_CODE)
+        end)
+    end)
+end
+
+
+
+-- Случай 1: меню УЖЕ открыто (второй execute)
+if PlayerGui:FindFirstChild("chooseType") then
+    print("[AutoJoin] chooseType already open → firing immediately")
+    fireChooseType()
+else
+    -- Случай 2: меню ещё нет (первый execute)
+    print("[AutoJoin] chooseType not found → sending code + waiting")
+
+    sendVipCode()
+
+    local conn
+    conn = PlayerGui.ChildAdded:Connect(function(child)
+        if child.Name == "chooseType" then
+            print("[AutoJoin] chooseType appeared!")
+            task.wait(0.7) -- даём прогрузиться
+            fireChooseType()
+            if conn then conn:Disconnect() end
+        end
+    end)
+
+
+    task.delay(10, function()
+        if conn then
+            conn:Disconnect()
+            print("[AutoJoin] Timeout, last try")
+            fireChooseType()
+        end
+    end)
+end
+
+
+task.spawn(function()
+    while game.PlaceId == LOBBY_PLACE do
+        task.wait(3)
+
+        if game.PlaceId ~= LOBBY_PLACE then break end
+
+        print("[AutoJoin] Retry tick")
+
+        if PlayerGui:FindFirstChild("chooseType") then
+            fireChooseType()
+        else
+            sendVipCode()
+        end
+    end
+end)
+
+TeleportService.TeleportInitFailed:Connect(function(p, result, err)
+    if p == LP then
+        warn("[AutoJoin] Teleport failed:", result, err)
+    end
+end)
+
