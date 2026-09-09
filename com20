@@ -6,6 +6,10 @@ local NOVA_SETTINGS = config.NovaHub or {
     LockFPS = true,
     FpsCap = 60,
 }
+local QUEUE_ON_TELEPORT = config.QueueOnTeleport
+if QUEUE_ON_TELEPORT == nil then
+    QUEUE_ON_TELEPORT = true
+end
 
 local LOBBY_PLACE = 1730877806
 local MAIN_PLACE  = 3978370137
@@ -17,19 +21,20 @@ local TeleportService = game:GetService("TeleportService")
 local LP = Players.LocalPlayer
 local PlayerGui = LP:WaitForChild("PlayerGui")
 
+if QUEUE_ON_TELEPORT then
+    local SCRIPT_URL = "https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com20"
+    queue_on_teleport([[
+        getgenv().GPO_AutoJoin = getgenv().GPO_AutoJoin or {}
+        loadstring(game:HttpGet("]] .. SCRIPT_URL .. [[") )()
+    ]])
+end
+
 local VIP_CODE = ACCOUNTS[LP.Name]
 if not VIP_CODE then
-    warn("[AutoJoin] Нет VIP-кода для аккаунта:", LP.Name)
     return
 end
 
-print("[AutoJoin] Account:", LP.Name, "| VIP:", VIP_CODE)
-
-
 if game.PlaceId == MAIN_PLACE then
-    print("[AutoJoin] Main detected, waiting for full load...")
-
-    -- Ждём персонажа
     if not LP.Character then
         LP.CharacterAdded:Wait()
     end
@@ -39,39 +44,29 @@ if game.PlaceId == MAIN_PLACE then
     local hrp = char:WaitForChild("HumanoidRootPart", 15)
 
     if not hum or not hrp then
-        warn("[AutoJoin] Character not fully loaded")
         return
     end
 
-
-    local ok1 = workspace:WaitForChild("PlayerCharacters", 20)
-    local ok2 = ReplicatedStorage:WaitForChild("Events", 20)
-    local ok3 = ReplicatedStorage:WaitForChild("Modules", 20)
+    workspace:WaitForChild("PlayerCharacters", 20)
+    ReplicatedStorage:WaitForChild("Events", 20)
+    ReplicatedStorage:WaitForChild("Modules", 20)
 
     task.wait(2.5)
-
-
 
     getgenv().NovaHub = NOVA_SETTINGS
     loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/6d1d42f1a622306f0c177c220a85ef47.lua"))()
     return
 end
 
-
 if game.PlaceId ~= LOBBY_PLACE then return end
-
 
 local function fireChooseType()
     local chooseType = PlayerGui:FindFirstChild("chooseType")
     if not chooseType then return false end
 
     local remote = chooseType:FindFirstChild("RemoteEvent", true)
-    if not remote then
-        warn("[AutoJoin] chooseType found but no RemoteEvent")
-        return false
-    end
+    if not remote then return false end
 
-    print("[AutoJoin] Firing chooseType true x6")
     for i = 1, 6 do
         pcall(function()
             remote:FireServer(true)
@@ -84,11 +79,7 @@ end
 local function sendVipCode()
     local reserved = ReplicatedStorage:FindFirstChild("Events") 
                   and ReplicatedStorage.Events:FindFirstChild("reserved")
-    if not reserved then
-        warn("[AutoJoin] reserved remote not found")
-        return
-    end
-
+    if not reserved then return end
 
     task.spawn(function()
         pcall(function()
@@ -97,20 +88,14 @@ local function sendVipCode()
     end)
 end
 
-
 if PlayerGui:FindFirstChild("chooseType") then
-    print("[AutoJoin] chooseType already open → firing immediately")
     fireChooseType()
 else
-
-    print("[AutoJoin] chooseType not found → sending code + waiting")
-
     sendVipCode()
 
     local conn
     conn = PlayerGui.ChildAdded:Connect(function(child)
         if child.Name == "chooseType" then
-            print("[AutoJoin] chooseType appeared!")
             task.wait(0.7)
             fireChooseType()
             if conn then conn:Disconnect() end
@@ -120,19 +105,16 @@ else
     task.delay(10, function()
         if conn then
             conn:Disconnect()
-            print("[AutoJoin] Timeout, last try")
             fireChooseType()
         end
     end)
 end
-
 
 task.spawn(function()
     while game.PlaceId == LOBBY_PLACE do
         task.wait(3)
         if game.PlaceId ~= LOBBY_PLACE then break end
 
-        print("[AutoJoin] Retry tick")
         if PlayerGui:FindFirstChild("chooseType") then
             fireChooseType()
         else
@@ -142,8 +124,4 @@ task.spawn(function()
 end)
 
 TeleportService.TeleportInitFailed:Connect(function(p, result, err)
-    if p == LP then
-        warn("[AutoJoin] Teleport failed:", result, err)
-    end
 end)
-
