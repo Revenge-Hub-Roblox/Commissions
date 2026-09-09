@@ -21,7 +21,7 @@ local Camera = Workspace.CurrentCamera
 Environment.ParsaAutofarmEnabled = Environment.ParsaAutofarmEnabled ~= false
 Environment.ParsaTeam = Environment.ParsaTeam or "Counter-Terrorists"
 Environment.ParsaAutoJoinDeathmatch = Environment.ParsaAutoJoinDeathmatch ~= false
-Environment.ParsaAutoBuyCase = Environment.ParsaAutoBuyCase ~= true
+Environment.ParsaAutoBuyCase = Environment.ParsaAutoBuyCase ~= false
 Environment.ParsaAutoOpenCase = Environment.ParsaAutoOpenCase ~= false
 Environment.ParsaBuyCaseName = Environment.ParsaBuyCaseName or "Viridian Case"
 Environment.ParsaOpenCaseName = Environment.ParsaOpenCaseName or "Viridian Case"
@@ -31,6 +31,8 @@ Environment.ParsaCaseNameExceptions = Environment.ParsaCaseNameExceptions or {
 }
 Environment.ParsaOpenType = Environment.ParsaOpenType or "Standard"
 Environment.ParsaWeaponPrices = Environment.ParsaWeaponPrices or {
+    ["M4A1-S"] = 3100,
+    ["AK-47"] = 2700,
     MP9 = 1250,
     ["MAC-10"] = 1050,
 }
@@ -39,12 +41,14 @@ Environment.ParsaBuyRetryInterval = Environment.ParsaBuyRetryInterval or 2.5
 Environment.ParsaBuyFailBackoff = Environment.ParsaBuyFailBackoff or 20
 Environment.ParsaAutoEquipAfterBuy = Environment.ParsaAutoEquipAfterBuy ~= false
 Environment.ParsaAutoWeapons = Environment.ParsaAutoWeapons or {
-    MP9 = true, ["MAC-10"] = true, ["AK-47"] = true, M4A1 = true,
+    ["M4A1-S"] = true, ["AK-47"] = true, MP9 = true, ["MAC-10"] = true, M4A1 = true,
 }
-Environment.ParsaSkipInvincible = Environment.ParsaSkipInvincible or false
+Environment.ParsaSkipInvincible = Environment.ParsaSkipInvincible ~= false
 Environment.ParsaReloadWait = Environment.ParsaReloadWait or 2.3
+Environment.ParsaHeadshotRatio = Environment.ParsaHeadshotRatio or 1
 
 local HIT_PART = "Head"
+local BODY_PART = "UpperTorso"
 local MAX_DISTANCE = 2500
 local MONEY_NAMES = { "Money", "Cash", "Coins", "Dollars" }
 local SILVER_NAMES = { "Credits", "Silver" }
@@ -68,9 +72,13 @@ local deltaHook = nil
 local caseInstanceCache = {}
 
 local shootSendHook = nil
+local fireServerHooked = nil
 local raycastCallCount = 0
 local lastRayRetargetAt = 0
 local forceScanBullets
+local raycastWrappers = {}
+local shotCounter = 0
+local targetWatchConns = nil
 
 local stats = {
     shotsRequested = 0,
@@ -79,11 +87,18 @@ local stats = {
     sendRetarget = 0,
     sendChainUnhooked = 0,
     sendClean = 0,
+    sendSkipped = 0,
+    sendL0 = 0,
     dmgAny = 0,
     dmgOnTarget = 0,
     reloads = 0,
     reloadRebinds = 0,
     forcedResets = 0,
+    rehooks = 0,
+    targetSwitches = 0,
+    shieldSkips = 0,
+    shieldRetargets = 0,
+    buyHoldShots = 0,
     scanOK = 0,
     scanSkipped = 0,
 }
@@ -123,20 +138,28 @@ local function findBytes(hay, from, needle)
     return nil
 end
 
+local function hasSpawnShield(character)
+    if not character then return false end
+    local ok, v = pcall(character.GetAttribute, character, "Invincible")
+    return ok and v == true
+end
+
 local function isCharacterTargetable(character)
     if not character then return false, "no-char" end
     if character.Parent and character.Parent.Name == "Debris" then return false, "debris" end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if humanoid then
         if humanoid.Health <= 0 then return false, "dead-hp" end
-        if Environment.ParsaSkipInvincible == true and character:GetAttribute("Invincible") then
-            return false, "invincible"
+        if Environment.ParsaSkipInvincible == true and hasSpawnShield(character) then
+            stats.shieldSkips += 1
+            return false, "shield"
         end
         return true
     end
     if character:GetAttribute("Dead") then return false, "dead-attr" end
-    if Environment.ParsaSkipInvincible == true and character:GetAttribute("Invincible") then
-        return false, "invincible"
+    if Environment.ParsaSkipInvincible == true and hasSpawnShield(character) then
+        stats.shieldSkips += 1
+        return false, "shield"
     end
     return true
 end
@@ -170,10 +193,19 @@ local function same_team(a, b)
     return an == bn
 end
 
-local function partFor(character)
-    return character:FindFirstChild(HIT_PART)
+local function chooseAimPart(character)
+    local ratio = tonumber(Environment.ParsaHeadshotRatio) or 1
+    if ratio >= 1 then
+        return character:FindFirstChild(HIT_PART) or character:FindFirstChild("Head") or character.PrimaryPart
+    end
+    shotCounter += 1
+    if (shotCounter % 100) / 100 < ratio then
+        return character:FindFirstChild(HIT_PART) or character:FindFirstChild("Head") or character.PrimaryPart
+    end
+    return character:FindFirstChild(BODY_PART)
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild(HIT_PART)
         or character:FindFirstChild("Head")
-        or character:FindFirstChild("HumanoidRootPart")
         or character.PrimaryPart
 end
 
@@ -191,7 +223,7 @@ local function scanForEnemyTarget()
                 local character = player.Character
                 local ok, reason = isCharacterTargetable(character)
                 if ok then
-                    local part = partFor(character)
+                    local part = chooseAimPart(character)
                     if part then
                         local dist = (part.Position - camPos).Magnitude
                         if dist <= MAX_DISTANCE and dist < bestDist then
@@ -211,6 +243,72 @@ local function scanForEnemyTarget()
     return best
 end
 
+local function immediateRetarget()
+    local best = scanForEnemyTarget()
+    if best then
+        if best.Player ~= Environment.ParsaCurrentTargetPlayer then
+            stats.targetSwitches += 1
+            tlog("TARGET", 1, "instant switch ->", best.Player.Name)
+        end
+        Environment.ParsaSilentTarget = best.Part
+        Environment.ParsaCurrentTargetPlayer = best.Player
+        Environment.ParsaSilentTargetInfo = best
+    else
+        Environment.ParsaSilentTarget = nil
+        Environment.ParsaCurrentTargetPlayer = nil
+        Environment.ParsaSilentTargetInfo = nil
+    end
+end
+
+local targetWatchConns = nil
+local function watchTargetSignals(player)
+    if targetWatchConns then
+        for _, c in ipairs(targetWatchConns) do
+            pcall(function() c:Disconnect() end)
+        end
+        targetWatchConns = nil
+    end
+    if not player or not player.Character then return end
+    local character = player.Character
+    local conns = {}
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local okD, connD = pcall(function()
+            return hum.Died:Connect(function()
+                if not Runtime.Alive then return end
+                if Environment.ParsaCurrentTargetPlayer == player then
+                    tlog("TARGET", 1, player.Name, "DIED -> instant retarget")
+                    immediateRetarget()
+                    local np = Environment.ParsaCurrentTargetPlayer
+                    if np then watchTargetSignals(np) end
+                end
+            end)
+        end)
+        if okD and connD then table.insert(conns, connD) end
+    end
+    local okS, connS = pcall(function()
+        return character:GetAttributeChangedSignal("Invincible"):Connect(function()
+            if not Runtime.Alive then return end
+            if Environment.ParsaCurrentTargetPlayer ~= player then return end
+            if Environment.ParsaSkipInvincible ~= true then return end
+            if hasSpawnShield(character) then
+                stats.shieldRetargets += 1
+                tlog("TARGET", 1, player.Name, "SHIELD ON -> instant retarget")
+                immediateRetarget()
+                local np = Environment.ParsaCurrentTargetPlayer
+                if np and np ~= player then watchTargetSignals(np) end
+            end
+        end)
+    end)
+    if okS and connS then table.insert(conns, connS) end
+    if #conns > 0 then
+        targetWatchConns = conns
+        for _, c in ipairs(conns) do
+            table.insert(caseEventConns, c)
+        end
+    end
+end
+
 local silentNextScan = 0
 local function updateSilentTarget(now)
     if Environment.ParsaAutofarmEnabled ~= true or not LocalPlayer.Character then
@@ -228,7 +326,7 @@ local function updateSilentTarget(now)
             Environment.ParsaSilentTarget = nil
             Environment.ParsaSilentTargetInfo = nil
         else
-            local part = prevPlayer.Character and partFor(prevPlayer.Character) or nil
+            local part = prevPlayer.Character and chooseAimPart(prevPlayer.Character) or nil
             if part and isTargetValid(part) then
                 Environment.ParsaSilentTarget = part
                 Environment.ParsaSilentTargetInfo = { Player = prevPlayer, Part = part }
@@ -242,8 +340,10 @@ local function updateSilentTarget(now)
     local best = scanForEnemyTarget()
     if best then
         tlog("TARGET", 2, "->", best.Player.Name)
+        watchTargetSignals(best.Player)
     else
-        tlog("TARGET", 10, "нет доступных врагов (ok=" .. stats.scanOK .. " skipped=" .. stats.scanSkipped .. ")")
+        tlog("TARGET", 10, "нет доступных врагов (ok=" .. stats.scanOK
+            .. " skipped=" .. stats.scanSkipped .. " shieldSkips=" .. stats.shieldSkips .. ")")
     end
     Environment.ParsaSilentTarget = best and best.Part or nil
     Environment.ParsaCurrentTargetPlayer = best and best.Player or nil
@@ -256,20 +356,14 @@ local function redirectBulletResult(returns)
     local result = returns[1]
     local SilentTarget = Environment.ParsaSilentTarget
     if not SilentTarget then
-        local found = scanForEnemyTarget()
-        if found then
-            SilentTarget = found.Part
-            Environment.ParsaSilentTarget = found.Part
-            Environment.ParsaCurrentTargetPlayer = found.Player
-            Environment.ParsaSilentTargetInfo = found
-        end
+        immediateRetarget()
+        SilentTarget = Environment.ParsaSilentTarget
     end
     if not SilentTarget then return end
     if not isTargetValid(SilentTarget) then
-        Environment.ParsaSilentTarget = nil
-        Environment.ParsaCurrentTargetPlayer = nil
-        Environment.ParsaSilentTargetInfo = nil
-        return
+        immediateRetarget()
+        SilentTarget = Environment.ParsaSilentTarget
+        if not SilentTarget then return end
     end
     local targetPos = SilentTarget.Position
     pcall(function()
@@ -467,31 +561,31 @@ local function dumpDataSources()
     end)
 end
 
-local MP9_PACKET_BYTES = {
+local M4A1_PACKET_BYTES = {
+    1, 40, 181, 47, 253, 32, 78, 113, 2, 0, 6, 3, 0, 0, 0, 4, 9, 0, 0, 0,
+    69, 113, 117, 105, 112, 109, 101, 110, 116, 1, 4, 4, 0, 0, 0, 80, 97, 116, 104,
+    4, 24, 0, 0, 0, 76, 111, 97, 100, 111, 117, 116, 46, 82, 105, 102, 108, 101,
+    115, 46, 79, 112, 116, 105, 111, 110, 115, 46, 50, 4, 4, 0, 0, 0, 78, 97,
+    109, 101, 4, 6, 0, 0, 0, 77, 52, 65, 49, 45, 83
+}
+local AK47_PACKET_BYTES = {
     1, 40, 181, 47, 253, 32, 77, 105, 2, 0, 6, 3, 0, 0, 0, 4, 9, 0, 0, 0,
     69, 113, 117, 105, 112, 109, 101, 110, 116, 1, 4, 4, 0, 0, 0, 80, 97, 116, 104,
-    4, 26, 0, 0, 0, 76, 111, 97, 100, 111, 117, 116, 46, 77, 105, 100, 32, 84, 105,
-    101, 114, 46, 79, 112, 116, 105, 111, 110, 115, 46, 49, 4, 4, 0, 0, 0, 78, 97,
-    109, 101, 4, 3, 0, 0, 0, 77, 80, 57
-}
-local MAC10_PACKET_BYTES = {
-    1, 40, 181, 47, 253, 32, 80, 129, 2, 0, 6, 3, 0, 0, 0, 4, 9, 0, 0, 0,
-    69, 113, 117, 105, 112, 109, 101, 110, 116, 1, 4, 4, 0, 0, 0, 80, 97, 116, 104,
-    4, 26, 0, 0, 0, 76, 111, 97, 100, 111, 117, 116, 46, 77, 105, 100, 32, 84, 105,
-    101, 114, 46, 79, 112, 116, 105, 111, 110, 115, 46, 49, 4, 4, 0, 0, 0, 78, 97,
-    109, 101, 4, 6, 0, 0, 0, 77, 65, 67, 45, 49, 48
+    4, 24, 0, 0, 0, 76, 111, 97, 100, 111, 117, 116, 46, 82, 105, 102, 108, 101,
+    115, 46, 79, 112, 116, 105, 111, 110, 115, 46, 50, 4, 4, 0, 0, 0, 78, 97,
+    109, 101, 4, 5, 0, 0, 0, 65, 75, 45, 52, 55
 }
 
 local TEAM_WEAPONS = {
     ["Counter-Terrorists"] = {
-        Name = "MP9",
-        Path = "Loadout.Mid Tier.Options.1",
-        Packet = bytesToBuffer(MP9_PACKET_BYTES),
+        Name = "M4A1-S",
+        Path = "Loadout.Rifles.Options.2",
+        Packet = bytesToBuffer(M4A1_PACKET_BYTES),
     },
     ["Terrorists"] = {
-        Name = "MAC-10",
-        Path = "Loadout.Mid Tier.Options.1",
-        Packet = bytesToBuffer(MAC10_PACKET_BYTES),
+        Name = "AK-47",
+        Path = "Loadout.Rifles.Options.2",
+        Packet = bytesToBuffer(AK47_PACKET_BYTES),
     },
 }
 
@@ -529,7 +623,7 @@ local function tryBuyTeamWeapon()
     end
     local ch = LocalPlayer.Character
     if not ch or ch:GetAttribute("Dead") then return end
-    local price = Environment.ParsaWeaponPrices and Environment.ParsaWeaponPrices[cfg.Name] or 1250
+    local price = Environment.ParsaWeaponPrices and Environment.ParsaWeaponPrices[cfg.Name] or 3100
     local money, src = getMatchMoney()
     local now = os.clock()
     if (now - lastBuyDebugAt) > 10 then
@@ -1542,7 +1636,7 @@ local function ensureAmmo(w, now)
     if prevRoundsValue == 0 and rounds > 0 then
         prevRoundsValue = rounds
         stats.reloadRebinds += 1
-        tlog("SHOT", 1, "reload COMPLETED -> weapon rebind + bullet rescan (rebinds=" .. stats.reloadRebinds .. ")")
+        tlog("SHOT", 1, "reload COMPLETED -> rebind + rescan (rebinds=" .. stats.reloadRebinds .. ")")
         reloadingUntil = 0
         resetWeaponCache("reload completed")
         if forceScanBullets then forceScanBullets() end
@@ -1580,6 +1674,19 @@ local function ensureAmmo(w, now)
 end
 
 local function remoteShoot(now)
+    local team = get_player_team(LocalPlayer)
+    local cfg = TEAM_WEAPONS[team]
+    if cfg and not hasWeapon(cfg.Name) then
+        local price = Environment.ParsaWeaponPrices and Environment.ParsaWeaponPrices[cfg.Name] or 3100
+        local money = getMatchMoney()
+        if money and money >= price and weaponBuyFails < 3 then
+            stopAutoFire()
+            stats.buyHoldShots += 1
+            tlog("SHOT", 5, "hold fire: saving money to buy", cfg.Name)
+            tryBuyTeamWeapon()
+            return
+        end
+    end
     local w = getWeaponController(now)
     if not w then
         stopAutoFire()
@@ -1589,7 +1696,7 @@ local function remoteShoot(now)
     if isAutomaticWeapon(w) then
         if not autoFireActive then
             autoFireActive = true
-            tlog("SHOT", 2, "AUTO weapon:", tostring(rawget(w, "Name")), "-> hold-fire mode (every frame)")
+            tlog("SHOT", 2, "AUTO weapon:", tostring(rawget(w, "Name")), "-> hold-fire mode")
         end
         if not ensureAmmo(w, now) then return end
         pcall(function() w.IsFireHeld = true end)
@@ -1695,13 +1802,8 @@ local lastUnhookRescanAt = 0
 local function redirectPayloadBullets(payload)
     local targetPart = Environment.ParsaSilentTarget
     if not targetPart then
-        local found = scanForEnemyTarget()
-        if found then
-            targetPart = found.Part
-            Environment.ParsaSilentTarget = found.Part
-            Environment.ParsaCurrentTargetPlayer = found.Player
-            Environment.ParsaSilentTargetInfo = found
-        end
+        immediateRetarget()
+        targetPart = Environment.ParsaSilentTarget
     end
     if not targetPart or not isTargetValid(targetPart) then return end
     local targetChar = targetPart:FindFirstAncestorOfClass("Model")
@@ -1714,65 +1816,64 @@ local function redirectPayloadBullets(payload)
         local bullet = bullets[i]
         if type(bullet) == "table" and typeof(bullet.Origin) == "Vector3" and type(bullet.Hits) == "table" then
             local origin = bullet.Origin
-            local lastIdx, lastHit = nil, nil
-            for idx, h in pairs(bullet.Hits) do
-                if type(h) == "table" and (lastIdx == nil or idx > lastIdx) then
-                    lastIdx, lastHit = idx, h
+            local camPos = Camera and Camera.CFrame and Camera.CFrame.Position
+            if typeof(camPos) ~= "Vector3" or (origin - camPos).Magnitude < 5 then
+                local lastIdx, lastHit = nil, nil
+                for idx, h in pairs(bullet.Hits) do
+                    if type(h) == "table" and (lastIdx == nil or idx > lastIdx) then
+                        lastIdx, lastHit = idx, h
+                    end
                 end
-            end
-            local alreadyTarget = false
-            if lastHit and typeof(lastHit.Instance) == "Instance" then
-                local hc = lastHit.Instance:FindFirstAncestorOfClass("Model")
-                if hc == targetChar then alreadyTarget = true end
-            end
-            if alreadyTarget then
-                stats.sendClean += 1
-                if typeof(lastHit.Position) == "Vector3" then
-                    local d = lastHit.Position - origin
-                    if d.Magnitude > 0.001 then
-                        bullet.Direction = d.Unit
+                local alreadyTarget = false
+                if lastHit and typeof(lastHit.Instance) == "Instance" then
+                    local hc = lastHit.Instance:FindFirstAncestorOfClass("Model")
+                    if hc == targetChar then alreadyTarget = true end
+                end
+                if alreadyTarget then
+                    stats.sendClean += 1
+                else
+                    local delta = targetPart.Position - origin
+                    local length = delta.Magnitude
+                    if length > 0.001 then
+                        local chain = buildHitChain(origin, targetPart)
+                        if #chain > 0 then
+                            bullet.Hits = chain
+                            local last = chain[#chain]
+                            if typeof(last.Position) == "Vector3" then
+                                local d = last.Position - origin
+                                if d.Magnitude > 0.001 then
+                                    bullet.Direction = d.Unit
+                                end
+                            end
+                            if rayHooked then
+                                stats.sendRetarget += 1
+                            else
+                                stats.sendChainUnhooked += 1
+                            end
+                        end
+                    end
+                    local now = os.clock()
+                    if not rayHooked and now - lastUnhookRescanAt > 1 then
+                        lastUnhookRescanAt = now
+                        tlog("SHOT", 2, "UNHOOKED bullet -> chain rebuild + force rescan")
+                        task.spawn(function()
+                            if forceScanBullets then forceScanBullets() end
+                        end)
                     end
                 end
             else
-                local delta = targetPart.Position - origin
-                local length = delta.Magnitude
-                if length > 0.001 then
-                    local chain = buildHitChain(origin, targetPart)
-                    if #chain > 0 then
-                        bullet.Hits = chain
-                        local last = chain[#chain]
-                        if typeof(last.Position) == "Vector3" then
-                            local d = last.Position - origin
-                            if d.Magnitude > 0.001 then
-                                bullet.Direction = d.Unit
-                            end
-                        end
-                        if rayHooked then
-                            stats.sendRetarget += 1
-                        else
-                            stats.sendChainUnhooked += 1
-                        end
-                    end
-                end
-                local now = os.clock()
-                if not rayHooked and now - lastUnhookRescanAt > 1 then
-                    lastUnhookRescanAt = now
-                    tlog("SHOT", 2, "UNHOOKED bullet -> chain rebuild + force rescan")
-                    task.spawn(function()
-                        if forceScanBullets then forceScanBullets() end
-                    end)
-                end
+                stats.sendSkipped += 1
             end
         end
     end
 end
 
 local function hookShootSend()
-    if shootSendHook then return end
+    if shootSendHook and shootSendHook.wrapper == shootWeaponPacket then return end
     if not shootWeaponPacket or type(shootWeaponPacket.Send) ~= "function" then return end
     local wrapper = shootWeaponPacket
     local orig = wrapper.Send
-    wrapper.Send = function(payload, ...)
+    local ourWrapper = function(payload, ...)
         if Runtime.Alive
             and Environment.ParsaAutofarmEnabled == true
             and type(payload) == "table"
@@ -1783,17 +1884,75 @@ local function hookShootSend()
         end
         return orig(payload, ...)
     end
-    shootSendHook = { wrapper = wrapper, orig = orig }
-    print("[Frozent] ShootWeapon.Send hooked (always-rebuild fallback)")
+    shootSendHook = { wrapper = wrapper, wrapperSend = ourWrapper, orig = orig }
+    rawset(wrapper, "Send", ourWrapper)
+    stats.rehooks += 1
+    print("[Frozent] ShootWeapon.Send hooked (rehooks=" .. stats.rehooks .. ")")
+end
+
+local function unhookShootSend()
+    if shootSendHook and shootSendHook.wrapper then
+        pcall(function() rawset(shootSendHook.wrapper, "Send", shootSendHook.orig) end)
+        shootSendHook = nil
+    end
 end
 
 task.spawn(function()
     while Runtime.Alive do
-        task.wait(1)
-        if not shootSendHook then
+        task.wait(0.5)
+        if not Runtime.Alive then break end
+        if not shootSendHook or shootSendHook.wrapper ~= shootWeaponPacket then
+            hookShootSend()
+        end
+        local w = weaponCache
+        if w then
+            local bc = rawget(w, "Bullet")
+            if type(bc) == "table" then
+                local cur = rawget(bc, "_performRaycast")
+                if type(cur) == "function" and not raycastWrappers[cur] and installedHooks[bc] == nil then
+                    tlog("WEAPON", 2, "active weapon Bullet not hooked -> force rescan")
+                    if forceScanBullets then forceScanBullets() end
+                end
+            end
+        end
+        if stats.sendL0 > 0 and stats.bulletsSent == 0 and shootSendHook then
+            tlog("SHOT", 2, "L0 sees shots but Send-hook silent -> re-hook")
+            unhookShootSend()
             hookShootSend()
         end
     end
+end)
+
+task.spawn(function()
+    if typeof(hookfunction) ~= "function" then
+        warn("[Frozent] hookfunction недоступен — уровень 0 (FireServer) выключен")
+        return
+    end
+    local shootRemote
+    for _ = 1, 30 do
+        if not Runtime.Alive then return end
+        local rs = ReplicatedStorage:FindFirstChild("NetworkRemotes")
+        local inv = rs and rs:FindFirstChild("Inventory")
+        shootRemote = inv and inv:FindFirstChild("ShootWeapon")
+        if shootRemote then break end
+        task.wait(1)
+    end
+    if not shootRemote then return end
+    local orig
+    orig = hookfunction(shootRemote.FireServer, function(self, buf, extra, ...)
+        if Runtime.Alive
+            and Environment.ParsaAutofarmEnabled == true
+            and self == shootRemote
+            and typeof(buf) == "buffer" then
+            stats.sendL0 += 1
+        end
+        return orig(self, buf, extra, ...)
+    end)
+    fireServerHooked = { remote = shootRemote, orig = orig }
+    table.insert(caseEventConns, { Disconnect = function()
+        pcall(function() hookfunction(shootRemote.FireServer, orig) end)
+    end })
+    print("[Frozent] ShootWeapon.FireServer hooked (L0, reload-proof)")
 end)
 
 local wdLastCount = 0
@@ -1804,16 +1963,15 @@ task.spawn(function()
         if not Runtime.Alive then break end
         if Environment.ParsaAutofarmEnabled == true
             and autoFireActive
-            and shootSendHook ~= nil
             and Environment.ParsaSilentTarget ~= nil
             and os.clock() > reloadingUntil then
-            if stats.bulletsSent ~= wdLastCount then
-                wdLastCount = stats.bulletsSent
+            if stats.sendL0 ~= wdLastCount then
+                wdLastCount = stats.sendL0
                 wdLastChangeAt = os.clock()
             elseif os.clock() - wdLastChangeAt > 2 then
                 wdLastChangeAt = os.clock()
                 stats.forcedResets += 1
-                tlog("SHOT", 1, "WATCHDOG: holding fire but no bullets 2s -> blacklist + reset + reload")
+                tlog("SHOT", 1, "WATCHDOG: holding fire but no L0 shots 2s -> blacklist + reset + reload")
                 markBadController(weaponCache)
                 resetWeaponCache("watchdog: no bullet flow")
                 local w = getWeaponController(os.clock())
@@ -1828,7 +1986,18 @@ task.spawn(function()
                 end
             end
         else
-            wdLastCount = stats.bulletsSent
+            if Environment.ParsaAutofarmEnabled == true
+                and Environment.ParsaSilentTarget ~= nil
+                and weaponCache
+                and stats.shotsRequested > 0
+                and stats.sendL0 == wdLastCount
+                and os.clock() - wdLastChangeAt > 3 then
+                tlog("SHOT", 2, "shots flowing but L0 silent -> force rehook Send")
+                unhookShootSend()
+                hookShootSend()
+                if forceScanBullets then forceScanBullets() end
+            end
+            wdLastCount = stats.sendL0
             wdLastChangeAt = os.clock()
         end
     end
@@ -1845,7 +2014,7 @@ task.spawn(function()
                 if w == weaponCache then found = true break end
             end
             if not found then
-                resetWeaponCache("controller disappeared from GC (replaced?)")
+                resetWeaponCache("controller disappeared from GC")
             end
         end
     end
@@ -1881,11 +2050,13 @@ end)
 task.spawn(function()
     while Runtime.Alive do
         task.wait(10)
-        print(("[Frozent][STATS] bullets=%d rayRetarget=%d sendRetarget=%d unhooked=%d clean=%d dmgAny=%d dmgOnTarget=%d reloads=%d rebinds=%d forcedResets=%d targetsOK=%d skipped=%d"):format(
+        print(("[Frozent][STATS] bullets=%d rayRetarget=%d sendRetarget=%d unhooked=%d clean=%d skipped=%d L0=%d dmgAny=%d dmgOnTarget=%d reloads=%d rebinds=%d resets=%d rehooks=%d targetSwitches=%d shieldSkips=%d shieldRetargets=%d buyHold=%d"):format(
             stats.bulletsSent, stats.rayRetarget, stats.sendRetarget,
-            stats.sendChainUnhooked, stats.sendClean, stats.dmgAny, stats.dmgOnTarget,
+            stats.sendChainUnhooked, stats.sendClean, stats.sendSkipped, stats.sendL0,
+            stats.dmgAny, stats.dmgOnTarget,
             stats.reloads, stats.reloadRebinds, stats.forcedResets,
-            stats.scanOK, stats.scanSkipped))
+            stats.rehooks, stats.targetSwitches,
+            stats.shieldSkips, stats.shieldRetargets, stats.buyHoldShots))
     end
 end)
 
@@ -1896,12 +2067,16 @@ Environment.ParsaDebugShot = function()
     print("[DEBUG] raycastCalls=", raycastCallCount,
         "| rayHookAge=", string.format("%.2fs", os.clock() - lastRayRetargetAt),
         "| sendHook=", shootSendHook ~= nil,
+        "| fireServerHook=", fireServerHooked ~= nil,
         "| autoMode=", autoFireActive,
         "| reloading=", os.clock() < reloadingUntil,
         "| weapon=", weaponCache and (weaponCache.Name or weaponCache.Identifier) or nil,
         "| rounds=", weaponCache and tostring(weaponCache.Rounds) or "?",
+        "| headshotRatio=", tostring(Environment.ParsaHeadshotRatio),
+        "| skipInvincible=", tostring(Environment.ParsaSkipInvincible),
         "| reloads=", stats.reloads, "| rebinds=", stats.reloadRebinds,
-        "| unhookedShots=", stats.sendChainUnhooked, "| forcedResets=", stats.forcedResets)
+        "| L0=", stats.sendL0, "| bullets=", stats.bulletsSent,
+        "| dmgAny=", stats.dmgAny, "| rehooks=", stats.rehooks)
 end
 
 Environment.ParsaDebugWeapons = function()
@@ -1930,10 +2105,8 @@ renderConnection = RunService.RenderStepped:Connect(function()
     updateSilentTarget(now)
     local targetInfo = Environment.ParsaSilentTargetInfo
     if targetInfo and not isTargetValid(targetInfo.Part) then
-        Environment.ParsaSilentTarget = nil
-        Environment.ParsaCurrentTargetPlayer = nil
-        Environment.ParsaSilentTargetInfo = nil
-        targetInfo = nil
+        immediateRetarget()
+        targetInfo = Environment.ParsaSilentTargetInfo
     end
     local myCharacter = LocalPlayer.Character
     local shouldAutoShoot = Environment.ParsaAutofarmEnabled == true
@@ -1953,7 +2126,14 @@ unloadScript = function()
     if renderConnection then renderConnection:Disconnect() renderConnection = nil end
     if respawnConn then respawnConn:Disconnect() respawnConn = nil end
     if equipConn then equipConn:Disconnect() equipConn = nil end
+    if targetWatchConns then
+        for _, c in ipairs(targetWatchConns) do
+            pcall(function() c:Disconnect() end)
+        end
+        targetWatchConns = nil
+    end
     stopAutoFire()
+    unhookShootSend()
     for _, c in ipairs(watchConns) do pcall(function() c:Disconnect() end) end
     watchConns = {}
     for obj, orig in pairs(installedHooks) do
@@ -1963,6 +2143,10 @@ unloadScript = function()
     if deltaHook then
         pcall(function() rawset(deltaHook.module, "ApplyInventoryDelta", deltaHook.orig) end)
         deltaHook = nil
+    end
+    if fireServerHooked then
+        pcall(function() hookfunction(fireServerHooked.remote.FireServer, fireServerHooked.orig) end)
+        fireServerHooked = nil
     end
     for _, conn in ipairs(caseEventConns) do
         pcall(function() conn:Disconnect() end)
@@ -1995,7 +2179,6 @@ task.spawn(function()
         warn("Auto farm requires getgc")
         return
     end
-    local raycastWrappers = {}
     local function makeRaycastWrapper(orig)
         local wrapper
         wrapper = function(...)
@@ -2326,22 +2509,25 @@ Environment.ParsaDebug = function()
         "| inDM=", tostring(Environment.ParsaIsDeathmatch and Environment.ParsaIsDeathmatch() or "?"))
     print("wrappers: PurchaseCase=", purchaseCasePacket ~= nil, "OpenCase=", openCasePacket ~= nil,
         "ShootWeapon=", shootWeaponPacket ~= nil, "BuyMenu=", buyMenuPacket ~= nil,
-        "sendHook=", shootSendHook ~= nil)
-    print("buyTemplate: table=", buyTemplateTable ~= nil, "bytes=", buyTemplateBytes ~= nil)
+        "sendHook=", shootSendHook ~= nil, "L0hook=", fireServerHooked ~= nil)
     print("money=", tostring(money), "(src=", tostring(src), ") credits=", tostring(getCredits()))
     print("weaponCache=", weaponCache and tostring(weaponCache.Name or weaponCache.Identifier) or "nil",
         "rounds=", weaponCache and tostring(weaponCache.Rounds) or "?",
         "autoMode=", autoFireActive, "reloading=", os.clock() < reloadingUntil)
     print("rayHookAge=", string.format("%.2fs", os.clock() - lastRayRetargetAt),
-        "unhookedShots=", stats.sendChainUnhooked)
-    print("target=", tostring(Environment.ParsaCurrentTargetPlayer and Environment.ParsaCurrentTargetPlayer.Name or nil))
-    print("scan: ok=", stats.scanOK, "skipped=", stats.scanSkipped)
+        "L0=", stats.sendL0, "bullets=", stats.bulletsSent, "dmgAny=", stats.dmgAny)
+    print("target=", tostring(Environment.ParsaCurrentTargetPlayer and Environment.ParsaCurrentTargetPlayer.Name or nil),
+        "switches=", stats.targetSwitches,
+        "shieldSkips=", stats.shieldSkips, "shieldRetargets=", stats.shieldRetargets)
+    print("scan: ok=", stats.scanOK, "skipped=", stats.scanSkipped,
+        "skipInvincible=", tostring(Environment.ParsaSkipInvincible))
     print("stats:", "bullets=" .. stats.bulletsSent, "rayRetarget=" .. stats.rayRetarget,
-        "sendRetarget=" .. stats.sendRetarget, "unhooked=" .. stats.sendChainUnhooked,
-        "clean=" .. stats.sendClean,
+        "sendRetarget=" .. stats.sendRetarget, "clean=" .. stats.sendClean,
+        "skipped=" .. stats.sendSkipped, "L0=" .. stats.sendL0,
         "dmgAny=" .. stats.dmgAny, "dmgOnTarget=" .. stats.dmgOnTarget,
         "reloads=" .. stats.reloads, "rebinds=" .. stats.reloadRebinds,
-        "forcedResets=" .. stats.forcedResets)
+        "forcedResets=" .. stats.forcedResets, "rehooks=" .. stats.rehooks,
+        "targetSwitches=" .. stats.targetSwitches, "buyHold=" .. stats.buyHoldShots)
     print("======================")
 end
 
@@ -2510,7 +2696,7 @@ local function rejoinIfNeeded()
     if not playBtn then return end
     lastRejoinAt = now
     rejoining = true
-    print("[Frozent] REJOIN: мы в меню (intermission/лобби) -> команда + DM + Play")
+    print("[Frozent] REJOIN: мы в меню -> команда + DM + Play")
     stopAutoFire()
     resetWeaponCache("back to lobby")
     local myTeam = get_player_team(LocalPlayer)
@@ -2552,7 +2738,11 @@ respawnConn = LocalPlayer.CharacterAdded:Connect(function()
     task.delay(2, tryBuyTeamWeapon)
 end)
 equipConn = LocalPlayer:GetAttributeChangedSignal("CurrentEquipped"):Connect(function()
-    resetWeaponCache("CurrentEquipped changed")
+    local eqId = equippedIdentifier()
+    local wid = weaponCache and rawget(weaponCache, "Identifier")
+    if eqId and wid and eqId ~= wid then
+        resetWeaponCache("CurrentEquipped -> " .. string.sub(eqId, 1, 8))
+    end
 end)
 task.spawn(function()
     while Runtime.Alive do
