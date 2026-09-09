@@ -23,17 +23,43 @@ if not VIP_CODE then
     return
 end
 
+print("[AutoJoin] Account:", LP.Name, "| VIP:", VIP_CODE)
+
 
 if game.PlaceId == MAIN_PLACE then
-    getgenv().NovaHub = NOVA_SETTINGS
+    print("[AutoJoin] Main detected, waiting for full load...")
 
+    -- Ждём персонажа
+    if not LP.Character then
+        LP.CharacterAdded:Wait()
+    end
+
+    local char = LP.Character
+    local hum = char:WaitForChild("Humanoid", 15)
+    local hrp = char:WaitForChild("HumanoidRootPart", 15)
+
+    if not hum or not hrp then
+        warn("[AutoJoin] Character not fully loaded")
+        return
+    end
+
+
+    local ok1 = workspace:WaitForChild("PlayerCharacters", 20)
+    local ok2 = ReplicatedStorage:WaitForChild("Events", 20)
+    local ok3 = ReplicatedStorage:WaitForChild("Modules", 20)
+
+    task.wait(2.5)
+
+
+
+    getgenv().NovaHub = NOVA_SETTINGS
     loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/6d1d42f1a622306f0c177c220a85ef47.lua"))()
     return
 end
 
+
 if game.PlaceId ~= LOBBY_PLACE then return end
 
-print("[AutoJoin] Lobby detected")
 
 local function fireChooseType()
     local chooseType = PlayerGui:FindFirstChild("chooseType")
@@ -45,6 +71,7 @@ local function fireChooseType()
         return false
     end
 
+    print("[AutoJoin] Firing chooseType true x6")
     for i = 1, 6 do
         pcall(function()
             remote:FireServer(true)
@@ -62,7 +89,7 @@ local function sendVipCode()
         return
     end
 
-    print("[AutoJoin] Sending VIP code...")
+
     task.spawn(function()
         pcall(function()
             reserved:InvokeServer(VIP_CODE)
@@ -70,10 +97,12 @@ local function sendVipCode()
     end)
 end
 
+
 if PlayerGui:FindFirstChild("chooseType") then
     print("[AutoJoin] chooseType already open → firing immediately")
     fireChooseType()
 else
+
     print("[AutoJoin] chooseType not found → sending code + waiting")
 
     sendVipCode()
@@ -97,6 +126,7 @@ else
     end)
 end
 
+
 task.spawn(function()
     while game.PlaceId == LOBBY_PLACE do
         task.wait(3)
@@ -116,3 +146,4 @@ TeleportService.TeleportInitFailed:Connect(function(p, result, err)
         warn("[AutoJoin] Teleport failed:", result, err)
     end
 end)
+
