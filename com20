@@ -1,6 +1,12 @@
+local config = getgenv().GPO_AutoJoin or {}
+local ACCOUNTS = config.Accounts or {}
+local NOVA_SETTINGS = config.NovaHub or {
+    DiscordWebHook = "",
+    Optimized = false,
+    LockFPS = true,
+    FpsCap = 60,
+}
 
-
-local VIP_CODE = "RmSripOT1k"
 local LOBBY_PLACE = 1730877806
 local MAIN_PLACE  = 3978370137
 
@@ -11,14 +17,17 @@ local TeleportService = game:GetService("TeleportService")
 local LP = Players.LocalPlayer
 local PlayerGui = LP:WaitForChild("PlayerGui")
 
+local VIP_CODE = ACCOUNTS[LP.Name]
+if not VIP_CODE then
+    warn("[AutoJoin] Нет VIP-кода для аккаунта:", LP.Name)
+    return
+end
+
+print("[AutoJoin] Account:", LP.Name, "| VIP:", VIP_CODE)
 
 if game.PlaceId == MAIN_PLACE then
-    getgenv().NovaHub = {
-        DiscordWebHook = "",
-        Optimized = false,
-        LockFPS = true,
-        FpsCap = 60,
-    }
+    getgenv().NovaHub = NOVA_SETTINGS
+
     loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/6d1d42f1a622306f0c177c220a85ef47.lua"))()
     return
 end
@@ -56,7 +65,6 @@ local function sendVipCode()
     end
 
     print("[AutoJoin] Sending VIP code...")
-    -- Не ждём результат (чтобы не зависать)
     task.spawn(function()
         pcall(function()
             reserved:InvokeServer(VIP_CODE)
@@ -64,14 +72,11 @@ local function sendVipCode()
     end)
 end
 
-
-
--- Случай 1: меню УЖЕ открыто (второй execute)
 if PlayerGui:FindFirstChild("chooseType") then
     print("[AutoJoin] chooseType already open → firing immediately")
     fireChooseType()
 else
-    -- Случай 2: меню ещё нет (первый execute)
+    -- Случай 2: меню ещё нет
     print("[AutoJoin] chooseType not found → sending code + waiting")
 
     sendVipCode()
@@ -80,12 +85,11 @@ else
     conn = PlayerGui.ChildAdded:Connect(function(child)
         if child.Name == "chooseType" then
             print("[AutoJoin] chooseType appeared!")
-            task.wait(0.7) -- даём прогрузиться
+            task.wait(0.7)
             fireChooseType()
             if conn then conn:Disconnect() end
         end
     end)
-
 
     task.delay(10, function()
         if conn then
@@ -96,15 +100,12 @@ else
     end)
 end
 
-
 task.spawn(function()
     while game.PlaceId == LOBBY_PLACE do
         task.wait(3)
-
         if game.PlaceId ~= LOBBY_PLACE then break end
 
         print("[AutoJoin] Retry tick")
-
         if PlayerGui:FindFirstChild("chooseType") then
             fireChooseType()
         else
@@ -118,4 +119,3 @@ TeleportService.TeleportInitFailed:Connect(function(p, result, err)
         warn("[AutoJoin] Teleport failed:", result, err)
     end
 end)
-
