@@ -7,53 +7,98 @@ getgenv().EquipTime = 0.75
 getgenv().SellRetryEmpty = 2
 getgenv().SellGap = 0.4
 getgenv().BuyCheckInterval = 2
-getgenv().sortOrder = "Desc"          
+getgenv().sortOrder = "Desc"
 getgenv().HopWhenNoItems = true
-getgenv().NoItemsTimeout = 5         
-getgenv().AutoAnswerAllDialogues = true  
+getgenv().NoItemsTimeout = 5
+getgenv().AutoAnswerAllDialogues = true
+
+
+getgenv().SellItems = {
+    ["Gold Coin"] = true,
+    ["Rokakaka"] = true,
+    ["Pure Rokakaka"] = true,
+    ["Mysterious Arrow"] = true,
+    ["Diamond"] = true,
+    ["Ancient Scroll"] = true,
+    ["Caesar's Headband"] = true,
+    ["Stone Mask"] = true,
+    ["Rib Cage of The Saint's Corpse"] = true,
+    ["Quinton's Glove"] = true,
+    ["Zeppeli's Hat"] = true,
+    ["Clackers"] = true,
+    ["Steel Ball"] = true,
+    ["Dio's Diary"] = true,
+
+    ["Zepellin's Headband"] = false,
+    ["Lucky Arrow"] = false,
+    ["Lucky Stone Mask"] = false,
+}
+
 
 
 local items_to_farm = {
-    {Name = "Mysterious Arrow",               Limit = 25},
-    {Name = "Rokakaka",                       Limit = 25},
-    {Name = "Gold Coin",                      Limit = 25},
-    {Name = "Diamond",                        Limit = 25},
-    {Name = "Pure Rokakaka",                  Limit = 5},
-    {Name = "Quinton's Glove",                Limit = 10},
-    {Name = "Steel Ball",                     Limit = 10},
-    {Name = "Rib Cage of The Saint's Corpse", Limit = 10},
-    {Name = "Zepellin's Headband",            Limit = 10},
-    {Name = "Zeppeli's Hat",                  Limit = 10},
-    {Name = "Caesar's Headband",              Limit = 10},
-    {Name = "Clackers",                       Limit = 10},
-    {Name = "Stone Mask",                     Limit = 10},
-    {Name = "Ancient Scroll",                 Limit = 10},
-    {Name = "Dio's Diary",                    Limit = 10},
+    {Name = "Mysterious Arrow",                Limit = 25},
+    {Name = "Rokakaka",                        Limit = 25},
+    {Name = "Gold Coin",                       Limit = 25},
+    {Name = "Diamond",                         Limit = 25},
+    {Name = "Pure Rokakaka",                   Limit = 5},
+    {Name = "Quinton's Glove",                 Limit = 10},
+    {Name = "Steel Ball",                      Limit = 10},
+    {Name = "Rib Cage of The Saint's Corpse",  Limit = 10},
+    {Name = "Zepellin's Headband",             Limit = 10},
+    {Name = "Zeppeli's Hat",                   Limit = 10},
+    {Name = "Caesar's Headband",               Limit = 10},
+    {Name = "Clackers",                        Limit = 10},
+    {Name = "Stone Mask",                      Limit = 10},
+    {Name = "Ancient Scroll",                  Limit = 10},
+    {Name = "Dio's Diary",                     Limit = 10},
 }
+
 
 
 game:GetService("CoreGui").DescendantAdded:Connect(function(obj)
     if obj.Name == "ErrorPrompt" then
         local msg = obj:FindFirstChild("ErrorMessage", true)
-        repeat task.wait() until msg and msg.Text ~= "Label"
+
+        repeat
+            task.wait()
+        until msg and msg.Text ~= "Label"
+
         local text = msg.Text
-        if text:match("kick") or text:match("You") or text:match("conn") or text:match("rejoin") then
-            game:GetService("TeleportService"):Teleport(2809202155, game.Players.LocalPlayer)
+
+        if text:match("kick")
+            or text:match("You")
+            or text:match("conn")
+            or text:match("rejoin") then
+
+            game:GetService("TeleportService"):Teleport(
+                2809202155,
+                game.Players.LocalPlayer
+            )
         end
     end
 end)
 
-repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer.Character
+repeat
+    task.wait()
+until game:IsLoaded()
+    and game.Players.LocalPlayer
+    and game.Players.LocalPlayer.Character
 
 local LP = game.Players.LocalPlayer
 local Char = LP.Character
+
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
 
-repeat task.wait() until Char:FindFirstChild("RemoteEvent") and Char:FindFirstChild("RemoteFunction")
+repeat
+    task.wait()
+until Char:FindFirstChild("RemoteEvent")
+    and Char:FindFirstChild("RemoteFunction")
 
 local RemoteEvent = Char.RemoteEvent
 local RemoteFunction = Char.RemoteFunction
+
 
 
 if not LP.PlayerGui:FindFirstChild("HUD") then
@@ -69,6 +114,7 @@ end)
 if LP.PlayerGui:FindFirstChild("LoadingScreen1") then
     LP.PlayerGui.LoadingScreen1:Destroy()
 end
+
 if LP.PlayerGui:FindFirstChild("LoadingScreen") then
     LP.PlayerGui.LoadingScreen:Destroy()
 end
@@ -77,21 +123,32 @@ task.spawn(function()
     for _ = 1, 30 do
         pcall(function()
             local pg = LP:FindFirstChild("PlayerGui")
+
             if pg then
-                if pg:FindFirstChild("LoadingScreen1") then pg.LoadingScreen1:Destroy() end
-                if pg:FindFirstChild("LoadingScreen") then pg.LoadingScreen:Destroy() end
+                if pg:FindFirstChild("LoadingScreen1") then
+                    pg.LoadingScreen1:Destroy()
+                end
+
+                if pg:FindFirstChild("LoadingScreen") then
+                    pg.LoadingScreen:Destroy()
+                end
             end
         end)
+
         task.wait(0.2)
     end
 end)
 
 
+
 LP.CharacterAdded:Connect(function(newChar)
     task.wait(1)
+
     Char = newChar
+
     RemoteEvent = newChar:WaitForChild("RemoteEvent")
     RemoteFunction = newChar:WaitForChild("RemoteFunction")
+
     for _, part in pairs(newChar:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then
             part.CanCollide = false
@@ -101,6 +158,7 @@ end)
 
 task.spawn(function()
     task.wait(1)
+
     if LP.Character then
         for _, part in pairs(LP.Character:GetDescendants()) do
             if part:IsA("BasePart") and part.CanCollide then
@@ -111,25 +169,46 @@ task.spawn(function()
 end)
 
 
+
 local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-    local method = getnamecallmethod()
-    local args = {...}
-    if method == "InvokeServer" and args[1] == "idklolbrah2de" then
-        return "  ___XP DE KEY"
-    end
-    return oldNamecall(self, ...)
-end))
+
+oldNamecall = hookmetamethod(
+    game,
+    "__namecall",
+    newcclosure(function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+
+        if method == "InvokeServer"
+            and args[1] == "idklolbrah2de" then
+
+            return "  ___XP DE KEY"
+        end
+
+        return oldNamecall(self, ...)
+    end)
+)
 
 local oldIndex
-oldIndex = hookfunction(getrawmetatable(LP.Character.HumanoidRootPart.Position).__index, function(self, key)
-    if getcallingscript() and getcallingscript().Name == "ItemSpawn" and tostring(key):lower() == "magnitude" then
-        return 0
+
+oldIndex = hookfunction(
+    getrawmetatable(LP.Character.HumanoidRootPart.Position).__index,
+    function(self, key)
+        if getcallingscript()
+            and getcallingscript().Name == "ItemSpawn"
+            and tostring(key):lower() == "magnitude" then
+
+            return 0
+        end
+
+        return oldIndex(self, key)
     end
-    return oldIndex(self, key)
+)
+
+pcall(function()
+    hookfunction(workspace.Raycast, function() end)
 end)
 
-pcall(function() hookfunction(workspace.Raycast, function() end) end)
 
 
 local sellHookOk = false
@@ -137,41 +216,79 @@ local sellHookCalls = 0
 
 local function isSellOptionText(text)
     local t = string.lower(tostring(text or ""))
-    if t:find("i'd like to sell", 1, true) then return true end
-    if t:find("i would like to sell", 1, true) then return true end
-    if t:find("id like to sell", 1, true) then return true end
-    if t:find("sell this", 1, true) then return true end
-    if t:find("sell all", 1, true) then return true end
-    if t:find("all of these", 1, true) then return true end
-    if t:find("deal", 1, true) then return true end
+
+    if t:find("i'd like to sell", 1, true) then
+        return true
+    end
+
+    if t:find("i would like to sell", 1, true) then
+        return true
+    end
+
+    if t:find("id like to sell", 1, true) then
+        return true
+    end
+
+    if t:find("sell this", 1, true) then
+        return true
+    end
+
+    if t:find("sell all", 1, true) then
+        return true
+    end
+
+    if t:find("all of these", 1, true) then
+        return true
+    end
+
+    if t:find("deal", 1, true) then
+        return true
+    end
+
     return false
 end
 
 local function findClientFunctionsModule()
     local found = nil
 
-
     if getnilinstances then
         for _, obj in ipairs(getnilinstances()) do
-            if obj:IsA("ModuleScript") and obj.Name:lower():find("clientfunc") then
+            if obj:IsA("ModuleScript")
+                and obj.Name:lower():find("clientfunc") then
+
                 local ok, mod = pcall(require, obj)
-                if ok and type(mod) == "table" and mod.DialogueType then
+
+                if ok
+                    and type(mod) == "table"
+                    and mod.DialogueType then
+
                     found = mod
                     break
                 end
             end
         end
     end
-    if found then return found end
 
+    if found then
+        return found
+    end
 
     pcall(function()
-        for _, obj in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+        for _, obj in ipairs(
+            game:GetService("ReplicatedStorage"):GetDescendants()
+        ) do
             if obj:IsA("ModuleScript") then
                 local n = obj.Name:lower()
-                if n:find("clientfunc", 1, true) or n:find("dialog", 1, true) then
+
+                if n:find("clientfunc", 1, true)
+                    or n:find("dialog", 1, true) then
+
                     local ok, mod = pcall(require, obj)
-                    if ok and type(mod) == "table" and mod.DialogueType then
+
+                    if ok
+                        and type(mod) == "table"
+                        and mod.DialogueType then
+
                         found = mod
                         break
                     end
@@ -179,149 +296,243 @@ local function findClientFunctionsModule()
             end
         end
     end)
+
     return found
 end
 
 local function setupSellHook()
-    if sellHookOk then return true end
+    if sellHookOk then
+        return true
+    end
 
     local ClientFunctions = findClientFunctionsModule()
+
     if not ClientFunctions then
         return false
     end
 
     local oldDialogueType = ClientFunctions.DialogueType
+
     local hookFn = function(args)
-        sellHookCalls += 1  
+        sellHookCalls += 1
+
         if not args or type(args.Options) ~= "table" then
             return oldDialogueType(args)
         end
 
-
         local selected = nil
+
         for _, opt in pairs(args.Options) do
-            local val = tostring(opt.Value or opt.Text or opt.Label or "")
+            local val = tostring(
+                opt.Value
+                or opt.Text
+                or opt.Label
+                or ""
+            )
+
             if isSellOptionText(val) then
                 selected = opt.Name
                 break
             end
         end
 
+        if not selected
+            and getgenv().AutoAnswerAllDialogues ~= false then
 
-        if not selected and getgenv().AutoAnswerAllDialogues ~= false then
             local first = args.Options[1]
+
             if not first then
-                for _, opt in pairs(args.Options) do first = opt break end
+                for _, opt in pairs(args.Options) do
+                    first = opt
+                    break
+                end
             end
-            if first then selected = first.Name end
+
+            if first then
+                selected = first.Name
+            end
         end
 
         if selected then
-            return { Option = selected }
+            return {
+                Option = selected
+            }
         end
+
         return oldDialogueType(args)
     end
 
     local ok = pcall(function()
         ClientFunctions.DialogueType = hookFn
     end)
+
     if not ok then
         print("[SellHook] Failed to override DialogueType (module frozen?)")
         return false
     end
 
     sellHookOk = true
+
     print("[SellHook] DialogueType hooked → all sell dialogues answer instantly")
+
     return true
 end
 
-
 setupSellHook()
+
 task.spawn(function()
     local tries = 0
+
     while not sellHookOk and tries < 30 do
         tries += 1
+
         task.wait(2)
-        if setupSellHook() then break end
+
+        if setupSellHook() then
+            break
+        end
     end
+
     if not sellHookOk then
         print("[SellHook] Dialogue module not found → staying on GUI-click fallback")
     end
 end)
 
 
+
 local function getMerchantData()
     local RS = game:GetService("ReplicatedStorage")
+
     local dialogue = RS:FindFirstChild("Dialogue")
+
     if dialogue then
         local m = dialogue:FindFirstChild("Merchant")
-        if m then return m end
+
+        if m then
+            return m
+        end
     end
-    -- fallback: любой "Merchant" в глубине ReplicatedStorage
+
     local m2 = RS:FindFirstChild("Merchant", true)
-    if m2 then return m2 end
+
+    if m2 then
+        return m2
+    end
+
     return nil
 end
+
 
 
 do
     local Lighting = game:GetService("Lighting")
     local Workspace = game:GetService("Workspace")
+
     local Saved = {}
 
     local function Save(Object, Property)
-        if not Object then return end
+        if not Object then
+            return
+        end
+
         Saved[Object] = Saved[Object] or {}
+
         if Saved[Object][Property] == nil then
-            local ok, val = pcall(function() return Object[Property] end)
-            if ok then Saved[Object][Property] = val end
+            local ok, val = pcall(function()
+                return Object[Property]
+            end)
+
+            if ok then
+                Saved[Object][Property] = val
+            end
         end
     end
 
     local function Set(Object, Property, Value)
-        if not Object then return end
+        if not Object then
+            return
+        end
+
         Save(Object, Property)
-        pcall(function() Object[Property] = Value end)
+
+        pcall(function()
+            Object[Property] = Value
+        end)
     end
 
     local function OptimizeLighting(Object)
         if Object == Lighting then
             Set(Object, "GlobalShadows", false)
-            pcall(function() Set(Object, "FogEnd", 1000000) end)
-            pcall(function() Set(Object, "Brightness", 0) end)
+
+            pcall(function()
+                Set(Object, "FogEnd", 1000000)
+            end)
+
+            pcall(function()
+                Set(Object, "Brightness", 0)
+            end)
+
             return
         end
-        if Object:IsA("PointLight") or Object:IsA("SpotLight") or Object:IsA("SurfaceLight") then
+
+        if Object:IsA("PointLight")
+            or Object:IsA("SpotLight")
+            or Object:IsA("SurfaceLight") then
+
             Set(Object, "Enabled", false)
-            pcall(function() Set(Object, "Brightness", 0) end)
+
+            pcall(function()
+                Set(Object, "Brightness", 0)
+            end)
         end
+
         if Object:IsA("PostEffect") then
             Set(Object, "Enabled", false)
         end
     end
 
     local function OptimizeTextures(Object)
-        if Object:IsA("Decal") or Object:IsA("Texture") then
+        if Object:IsA("Decal")
+            or Object:IsA("Texture") then
+
             Set(Object, "Transparency", 1)
+
             return
         end
+
         if Object:IsA("SurfaceAppearance") then
             Set(Object, "Enabled", false)
             return
         end
+
         if Object:IsA("BasePart") then
-            pcall(function() Set(Object, "Reflectance", 0) end)
-            pcall(function() Set(Object, "CastShadow", false) end)
-            pcall(function() Set(Object, "Material", Enum.Material.Plastic) end)
+            pcall(function()
+                Set(Object, "Reflectance", 0)
+            end)
+
+            pcall(function()
+                Set(Object, "CastShadow", false)
+            end)
+
+            pcall(function()
+                Set(Object, "Material", Enum.Material.Plastic)
+            end)
         end
     end
 
     local function OptimizeEffects(Object)
-        if Object:IsA("ParticleEmitter") or Object:IsA("Trail") or Object:IsA("Beam")
-            or Object:IsA("Smoke") or Object:IsA("Fire") or Object:IsA("Sparkles") then
+        if Object:IsA("ParticleEmitter")
+            or Object:IsA("Trail")
+            or Object:IsA("Beam")
+            or Object:IsA("Smoke")
+            or Object:IsA("Fire")
+            or Object:IsA("Sparkles") then
+
             Set(Object, "Enabled", false)
+
             return
         end
+
         if Object:IsA("PostEffect") then
             Set(Object, "Enabled", false)
         end
@@ -329,27 +540,42 @@ do
 
     local function OptimizeTerrain()
         local Terrain = Workspace:FindFirstChildOfClass("Terrain")
+
         if Terrain then
-            pcall(function() Set(Terrain, "Decoration", false) end)
+            pcall(function()
+                Set(Terrain, "Decoration", false)
+            end)
         end
     end
 
     local function ApplyExtreme()
         OptimizeLighting(Lighting)
+
         for _, Object in ipairs(Workspace:GetDescendants()) do
             OptimizeLighting(Object)
             OptimizeTextures(Object)
             OptimizeEffects(Object)
+
             if Object:IsA("BasePart") then
-                pcall(function() Set(Object, "CastShadow", false) end)
-                pcall(function() Set(Object, "Reflectance", 0) end)
-                pcall(function() Set(Object, "Material", Enum.Material.Plastic) end)
+                pcall(function()
+                    Set(Object, "CastShadow", false)
+                end)
+
+                pcall(function()
+                    Set(Object, "Reflectance", 0)
+                end)
+
+                pcall(function()
+                    Set(Object, "Material", Enum.Material.Plastic)
+                end)
             end
         end
+
         for _, Object in ipairs(Lighting:GetDescendants()) do
             OptimizeLighting(Object)
             OptimizeEffects(Object)
         end
+
         OptimizeTerrain()
     end
 
@@ -375,12 +601,19 @@ do
     end)
 
     task.spawn(function()
-        local dof = Lighting:FindFirstChild("DepthOfField") or Lighting:WaitForChild("DepthOfField", 10)
-        if dof then pcall(function() dof:Destroy() end) end
+        local dof = Lighting:FindFirstChild("DepthOfField")
+            or Lighting:WaitForChild("DepthOfField", 10)
+
+        if dof then
+            pcall(function()
+                dof:Destroy()
+            end)
+        end
     end)
 
     print("[FPS] Extreme optimizer enabled")
 end
+
 
 
 local VISITED_FILE = "visited_servers.json"
@@ -390,72 +623,106 @@ local PlaceId = game.PlaceId
 local function loadVisited()
     if isfile and isfile(VISITED_FILE) then
         local ok, data = pcall(function()
-            return HttpService:JSONDecode(readfile(VISITED_FILE))
+            return HttpService:JSONDecode(
+                readfile(VISITED_FILE)
+            )
         end)
-        if ok and type(data) == "table" and type(data.servers) == "table" then
+
+        if ok
+            and type(data) == "table"
+            and type(data.servers) == "table" then
+
             return data
         end
     end
-    return { servers = {}, hopCount = 0 }
+
+    return {
+        servers = {},
+        hopCount = 0
+    }
 end
 
 local function saveVisited(data)
     if writefile then
         pcall(function()
-            writefile(VISITED_FILE, HttpService:JSONEncode(data))
+            writefile(
+                VISITED_FILE,
+                HttpService:JSONEncode(data)
+            )
         end)
     end
 end
 
 local function isServerVisited(sid)
     local data = loadVisited()
+
     return data.servers[tostring(sid)] == true
 end
 
 local function markServerVisited(sid)
     sid = tostring(sid)
+
     local data = loadVisited()
+
     data.servers[sid] = true
     data.hopCount = (data.hopCount or 0) + 1
 
     if data.hopCount >= CLEAR_EVERY then
-        print("[Hop] Cleared visited list after", CLEAR_EVERY, "successful hops")
+        print(
+            "[Hop] Cleared visited list after",
+            CLEAR_EVERY,
+            "successful hops"
+        )
+
         data.servers = {}
         data.hopCount = 0
     end
 
     saveVisited(data)
+
     print("[Hop] Marked server as visited:", sid)
 end
 
 local function unmarkServer(sid)
     sid = tostring(sid)
+
     local data = loadVisited()
+
     if data.servers[sid] then
         data.servers[sid] = nil
+
         saveVisited(data)
+
         print("[Hop] Unmarked server (teleport failed):", sid)
     end
 end
-
 
 local cursor = ""
 local lastTriedServer = nil
 local teleportInProgress = false
 local teleportFailed = false
 
+TeleportService.TeleportInitFailed:Connect(
+    function(player, teleportResult, errorMessage)
+        if player ~= LP then
+            return
+        end
 
-TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
-    if player ~= LP then return end
-    teleportFailed = true
-    teleportInProgress = false
-    print("[Hop] TeleportInitFailed:", tostring(teleportResult), tostring(errorMessage))
+        teleportFailed = true
+        teleportInProgress = false
 
-    if lastTriedServer then
-        unmarkServer(lastTriedServer)
-        lastTriedServer = nil
+        print(
+            "[Hop] TeleportInitFailed:",
+            tostring(teleportResult),
+            tostring(errorMessage)
+        )
+
+        if lastTriedServer then
+            unmarkServer(lastTriedServer)
+            lastTriedServer = nil
+        end
     end
-end)
+)
 
 local function hopServer(force)
     if teleportInProgress and not force then
@@ -464,165 +731,272 @@ local function hopServer(force)
     end
 
     print("[Hop] Searching for fullest available server...")
+
     local tries = 0
     local maxTries = 20
 
     while tries < maxTries do
-        tries = tries + 1
+        tries += 1
         teleportFailed = false
 
         local ok, data = pcall(function()
             local url
+
             if cursor ~= "" then
-                url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=" .. (getgenv().sortOrder or "Desc") .. "&limit=100&cursor=" .. cursor
+                url =
+                    "https://games.roblox.com/v1/games/"
+                    .. PlaceId
+                    .. "/servers/Public?sortOrder="
+                    .. (getgenv().sortOrder or "Desc")
+                    .. "&limit=100&cursor="
+                    .. cursor
             else
-                url = "https://games.roblox.com/v1/games/" .. PlaceId .. "/servers/Public?sortOrder=" .. (getgenv().sortOrder or "Desc") .. "&limit=100"
+                url =
+                    "https://games.roblox.com/v1/games/"
+                    .. PlaceId
+                    .. "/servers/Public?sortOrder="
+                    .. (getgenv().sortOrder or "Desc")
+                    .. "&limit=100"
             end
-            return HttpService:JSONDecode(game:HttpGet(url))
+
+            return HttpService:JSONDecode(
+                game:HttpGet(url)
+            )
         end)
 
         if not ok or not data or not data.data then
             print("[Hop] Failed to get server list, retrying...")
+
             task.wait(2)
+
             continue
         end
 
-        if data.nextPageCursor and data.nextPageCursor ~= "null" then
+        if data.nextPageCursor
+            and data.nextPageCursor ~= "null" then
+
             cursor = data.nextPageCursor
         else
             cursor = ""
         end
 
-
         table.sort(data.data, function(a, b)
-            return (tonumber(a.playing) or 0) > (tonumber(b.playing) or 0)
+            return (tonumber(a.playing) or 0)
+                > (tonumber(b.playing) or 0)
         end)
 
         local found = false
+
         for _, server in ipairs(data.data) do
             local sid = tostring(server.id)
             local playing = tonumber(server.playing) or 0
             local maxP = tonumber(server.maxPlayers) or 0
 
-            
             if sid == tostring(game.JobId) then
                 continue
             end
-            if maxP > playing and not isServerVisited(sid) then
-                found = true
-                lastTriedServer = sid
-                markServerVisited(sid)   
 
-                print(string.format("[Hop] Trying server %s (%d/%d) ...", sid, playing, maxP))
+            if maxP > playing
+                and not isServerVisited(sid) then
+
+                found = true
+
+                lastTriedServer = sid
+
+                markServerVisited(sid)
+
+                print(
+                    string.format(
+                        "[Hop] Trying server %s (%d/%d) ...",
+                        sid,
+                        playing,
+                        maxP
+                    )
+                )
+
                 teleportInProgress = true
                 teleportFailed = false
 
                 local teleportOk = pcall(function()
-                    TeleportService:TeleportToPlaceInstance(PlaceId, sid, LP)
+                    TeleportService:TeleportToPlaceInstance(
+                        PlaceId,
+                        sid,
+                        LP
+                    )
                 end)
 
                 if not teleportOk then
                     print("[Hop] Teleport call failed")
+
                     unmarkServer(sid)
+
                     lastTriedServer = nil
                     teleportInProgress = false
+
                     task.wait(1)
-                    break  
+
+                    break
                 end
 
-
                 local waitStart = tick()
+
                 while tick() - waitStart < 8 do
                     if teleportFailed then
                         break
                     end
+
                     task.wait(0.4)
                 end
 
                 if teleportFailed then
-                    print("[Hop] Server was full / teleport failed → trying next")
+                    print(
+                        "[Hop] Server was full / teleport failed → trying next"
+                    )
+
                     task.wait(1.5)
-                    break  
+
+                    break
                 end
 
+                print(
+                    "[Hop] Teleport seems stuck, unmarking and retrying..."
+                )
 
-                print("[Hop] Teleport seems stuck, unmarking and retrying...")
                 unmarkServer(sid)
+
                 lastTriedServer = nil
                 teleportInProgress = false
+
                 task.wait(1)
+
                 break
             end
         end
 
         if not found then
-            print("[Hop] No suitable servers on this page, next page...")
+            print(
+                "[Hop] No suitable servers on this page, next page..."
+            )
+
             task.wait(1.5)
         end
     end
 
-
     print("[Hop] Fallback: simple rejoin")
+
     pcall(function()
-        TeleportService:Teleport(PlaceId, LP)
+        TeleportService:Teleport(
+            PlaceId,
+            LP
+        )
     end)
 end
 
 
+
 local function getItemSpawns(itemName)
-    local result = { Position = {}, ProximityPrompt = {} }
-    local folder = workspace:FindFirstChild("Item_Spawns") and workspace.Item_Spawns:FindFirstChild("Items")
-    if not folder then return result end
+    local result = {
+        Position = {},
+        ProximityPrompt = {}
+    }
+
+    local folder =
+        workspace:FindFirstChild("Item_Spawns")
+        and workspace.Item_Spawns:FindFirstChild("Items")
+
+    if not folder then
+        return result
+    end
+
     for _, item in pairs(folder:GetChildren()) do
-        if item:FindFirstChild("MeshPart") and item:FindFirstChild("ProximityPrompt") then
-            if item.ProximityPrompt.ObjectText == itemName and item.ProximityPrompt.MaxActivationDistance == 8 then
-                table.insert(result.ProximityPrompt, item.ProximityPrompt)
-                table.insert(result.Position, item.MeshPart.CFrame)
+        if item:FindFirstChild("MeshPart")
+            and item:FindFirstChild("ProximityPrompt") then
+
+            if item.ProximityPrompt.ObjectText == itemName
+                and item.ProximityPrompt.MaxActivationDistance == 8 then
+
+                table.insert(
+                    result.ProximityPrompt,
+                    item.ProximityPrompt
+                )
+
+                table.insert(
+                    result.Position,
+                    item.MeshPart.CFrame
+                )
             end
         end
     end
+
     return result
 end
 
 local function collectItem(spawnData, index)
     local collected = false
-    local timeout = (getgenv().waitUntilCollect or 0.5) + 4
+
+    local timeout =
+        (getgenv().waitUntilCollect or 0.5) + 4
+
     local char = LP.Character
 
-    if char and char:FindFirstChild("SummonedStand") and char.SummonedStand.Value then
+    if char
+        and char:FindFirstChild("SummonedStand")
+        and char.SummonedStand.Value then
+
         pcall(function()
             local rf = char:FindFirstChild("RemoteFunction")
-            if rf then rf:InvokeServer("ToggleStand", "Toggle") end
+
+            if rf then
+                rf:InvokeServer(
+                    "ToggleStand",
+                    "Toggle"
+                )
+            end
         end)
     end
 
     local conn
+
     conn = LP.Backpack.ChildAdded:Connect(function()
         collected = true
-        if conn then conn:Disconnect() end
+
+        if conn then
+            conn:Disconnect()
+        end
     end)
 
     task.spawn(function()
         while not collected do
             task.wait()
+
             pcall(function()
-                local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local hrp =
+                    LP.Character
+                    and LP.Character:FindFirstChild("HumanoidRootPart")
+
                 if hrp and spawnData.Position[index] then
-                    hrp.CFrame = spawnData.Position[index] - Vector3.new(0, 8, 0)
+                    hrp.CFrame =
+                        spawnData.Position[index]
+                        - Vector3.new(0, 8, 0)
                 end
             end)
         end
     end)
 
-    task.wait(getgenv().waitUntilCollect or 0.5)
+    task.wait(
+        getgenv().waitUntilCollect or 0.5
+    )
 
     task.spawn(function()
         for _ = 1, 8 do
             pcall(function()
                 if spawnData.ProximityPrompt[index] then
-                    fireproximityprompt(spawnData.ProximityPrompt[index])
+                    fireproximityprompt(
+                        spawnData.ProximityPrompt[index]
+                    )
                 end
             end)
+
             task.wait(0.12)
         end
     end)
@@ -635,27 +1009,39 @@ local function collectItem(spawnData, index)
     while not collected do
         task.wait()
     end
-    if conn then conn:Disconnect() end
-end
 
+    if conn then
+        conn:Disconnect()
+    end
+end
 
 local lastItemSeen = tick()
 
 local function farmLoop()
     print("[Farm] started")
+
     while true do
         local any = false
+
         for _, info in ipairs(items_to_farm) do
             local spawns = getItemSpawns(info.Name)
+
             if #spawns.Position > 0 then
                 any = true
                 lastItemSeen = tick()
-                print("[Farm] Collecting:", info.Name, #spawns.Position)
+
+                print(
+                    "[Farm] Collecting:",
+                    info.Name,
+                    #spawns.Position
+                )
+
                 for i = 1, #spawns.Position do
                     collectItem(spawns, i)
                     task.wait(0.15)
                 end
             end
+
             task.wait(0.05)
         end
 
@@ -663,10 +1049,20 @@ local function farmLoop()
             lastItemSeen = tick()
             task.wait(0.2)
         else
-            if getgenv().HopWhenNoItems and (tick() - lastItemSeen) >= (getgenv().NoItemsTimeout or 5) then
-                print("[Farm] No items for", math.floor(tick() - lastItemSeen), "s → hopping")
+            if getgenv().HopWhenNoItems
+                and (tick() - lastItemSeen)
+                    >= (getgenv().NoItemsTimeout or 5) then
+
+                print(
+                    "[Farm] No items for",
+                    math.floor(tick() - lastItemSeen),
+                    "s → hopping"
+                )
+
                 hopServer()
+
                 task.wait(8)
+
                 lastItemSeen = tick()
             else
                 task.wait(0.5)
@@ -676,13 +1072,22 @@ local function farmLoop()
 end
 
 
+
 local function fireClick(btn)
-    if not btn then return false end
+    if not btn then
+        return false
+    end
+
     if getconnections then
-        for _, c in ipairs(getconnections(btn.MouseButton1Click)) do
+        for _, c in ipairs(
+            getconnections(btn.MouseButton1Click)
+        ) do
             pcall(function()
-                if c.Fire then c:Fire()
-                elseif c.Function then c.Function() end
+                if c.Fire then
+                    c:Fire()
+                elseif c.Function then
+                    c.Function()
+                end
             end)
         end
     else
@@ -691,47 +1096,78 @@ local function fireClick(btn)
             firesignal(btn.Activated)
         end)
     end
+
     return true
 end
 
 local function waitOption(substr, timeout)
     timeout = timeout or 5
+
     local t0 = tick()
+
     substr = string.lower(substr)
+
     while tick() - t0 < timeout do
-        local gui = LP.PlayerGui:FindFirstChild("DialogueGui")
-        if gui and gui.Frame and gui.Frame:FindFirstChild("Options") then
-            for _, opt in ipairs(gui.Frame.Options:GetChildren()) do
+        local gui =
+            LP.PlayerGui:FindFirstChild("DialogueGui")
+
+        if gui
+            and gui.Frame
+            and gui.Frame:FindFirstChild("Options") then
+
+            for _, opt in ipairs(
+                gui.Frame.Options:GetChildren()
+            ) do
                 local btn = opt:FindFirstChild("TextButton")
-                if btn and btn.Text and string.find(string.lower(btn.Text), substr, 1, true) then
+
+                if btn
+                    and btn.Text
+                    and string.find(
+                        string.lower(btn.Text),
+                        substr,
+                        1,
+                        true
+                    ) then
+
                     return btn
                 end
             end
         end
+
         task.wait(0.05)
     end
+
     return nil
 end
 
 local function hasDialogue()
-    return LP.PlayerGui:FindFirstChild("DialogueGui") ~= nil
+    return LP.PlayerGui:FindFirstChild(
+        "DialogueGui"
+    ) ~= nil
 end
 
-
 local function dialogueStarted(callsBefore)
-    if sellHookOk and sellHookCalls > (callsBefore or 0) then
+    if sellHookOk
+        and sellHookCalls > (callsBefore or 0) then
+
         return true
     end
+
     return hasDialogue()
 end
 
+
+
 local function findTool(toolName)
     local target = string.lower(toolName)
-    local function search(parent)
-        if not parent then return nil end
 
+    local function search(parent)
+        if not parent then
+            return nil
+        end
 
         local exact = parent:FindFirstChild(toolName)
+
         if exact and exact:IsA("Tool") then
             return exact
         end
@@ -740,105 +1176,208 @@ local function findTool(toolName)
             if t:IsA("Tool") then
                 local n = string.lower(t.Name)
 
-                if n == target and not string.find(n, "lucky", 1, true) then
+
+                if n == target then
                     return t
                 end
             end
         end
+
         return nil
     end
-    return search(LP.Character) or search(LP:FindFirstChild("Backpack"))
-end
 
+    return search(LP.Character)
+        or search(LP:FindFirstChild("Backpack"))
+end
 
 local function countTool(toolName)
     local c = 0
+
     local target = string.lower(toolName)
+
     local function scan(parent)
-        if not parent then return end
+        if not parent then
+            return
+        end
+
         for _, t in ipairs(parent:GetChildren()) do
             if t:IsA("Tool") then
                 local n = string.lower(t.Name)
-                if not string.find(n, "lucky", 1, true) then
-                    if n == target or string.find(n, target, 1, true) then
-                        c = c + 1
-                    end
+
+
+
+                if n == target
+                    or string.find(n, target, 1, true) then
+
+                    c += 1
                 end
             end
         end
     end
+
     scan(LP:FindFirstChild("Backpack"))
     scan(LP.Character)
+
     return c
 end
 
+
+
+local function isSellable(name)
+    if not name then
+        return false
+    end
+
+    local config = getgenv().SellItems
+
+    if type(config) ~= "table" then
+        return false
+    end
+
+    if config[name] ~= nil then
+        return config[name] == true
+    end
+
+
+    local target = string.lower(tostring(name))
+
+    for itemName, enabled in pairs(config) do
+        if string.lower(tostring(itemName)) == target then
+            return enabled == true
+        end
+    end
+
+
+    return false
+end
+
+
+
 local function ensureEquipped(toolName)
     local char = LP.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    if not char or not hum then return false end
 
-    -- уже экипирован?
+    local hum =
+        char
+        and char:FindFirstChildOfClass("Humanoid")
+
+    if not char or not hum then
+        return false
+    end
+
     local equipped = findTool(toolName)
-    if equipped and equipped.Parent == char then
+
+    if equipped
+        and equipped.Parent == char then
+
         return true
     end
 
     local tool = findTool(toolName)
+
     if not tool then
-        print("[Sell] DEBUG: tool not found in backpack/character:", toolName)
+        print(
+            "[Sell] DEBUG: tool not found:",
+            toolName
+        )
+
         return false
     end
 
     hum:EquipTool(tool)
-    task.wait(getgenv().EquipTime or 0.75)
+
+    task.wait(
+        getgenv().EquipTime or 0.75
+    )
+
     return tool.Parent == char
 end
 
 
+
 local function startMerchantTalk()
-    local re = LP.Character and LP.Character:FindFirstChild("RemoteEvent")
-    if not re then return false end
+    local re =
+        LP.Character
+        and LP.Character:FindFirstChild("RemoteEvent")
+
+    if not re then
+        return false
+    end
 
     local callsBefore = sellHookCalls
+
     local merchantData = getMerchantData()
 
     if merchantData then
-        pcall(function() re:FireServer("PromptTriggered", merchantData) end)
+        pcall(function()
+            re:FireServer(
+                "PromptTriggered",
+                merchantData
+            )
+        end)
+
         local t0 = tick()
+
         while tick() - t0 < 0.8 do
             task.wait(0.1)
+
             if dialogueStarted(callsBefore) then
-                print("[Sell] Dialogue started via PromptTriggered(instance)")
+                print(
+                    "[Sell] Dialogue started via PromptTriggered(instance)"
+                )
+
                 return true
             end
         end
     end
 
+    pcall(function()
+        re:FireServer(
+            "PromptTriggered",
+            "Merchant"
+        )
+    end)
 
-    pcall(function() re:FireServer("PromptTriggered", "Merchant") end)
     do
         local t0 = tick()
+
         while tick() - t0 < 0.8 do
             task.wait(0.1)
+
             if dialogueStarted(callsBefore) then
-                print("[Sell] Dialogue started via PromptTriggered(string)")
+                print(
+                    "[Sell] Dialogue started via PromptTriggered(string)"
+                )
+
                 return true
             end
         end
     end
 
+    local model =
+        workspace.Dialogues
+        and workspace.Dialogues:FindFirstChild(
+            "ShiftPlox, The Travelling Merchant"
+        )
 
-    local model = workspace.Dialogues and workspace.Dialogues:FindFirstChild("ShiftPlox, The Travelling Merchant")
     if model then
         for _, d in ipairs(model:GetDescendants()) do
             if d:IsA("ProximityPrompt") then
                 local cb = sellHookCalls
-                pcall(function() fireproximityprompt(d) end)
+
+                pcall(function()
+                    fireproximityprompt(d)
+                end)
+
                 local t0 = tick()
+
                 while tick() - t0 < 0.6 do
                     task.wait(0.1)
+
                     if dialogueStarted(cb) then
-                        print("[Sell] Dialogue started via ProximityPrompt")
+                        print(
+                            "[Sell] Dialogue started via ProximityPrompt"
+                        )
+
                         return true
                     end
                 end
@@ -846,13 +1385,18 @@ local function startMerchantTalk()
         end
     end
 
-    print("[Sell] DEBUG: all dialogue-start methods failed")
+    print(
+        "[Sell] DEBUG: all dialogue-start methods failed"
+    )
+
     return false
 end
 
 local function closeDialogue()
     pcall(function()
-        local gui = LP.PlayerGui:FindFirstChild("DialogueGui")
+        local gui =
+            LP.PlayerGui:FindFirstChild("DialogueGui")
+
         if gui then
             gui:Destroy()
         end
@@ -860,68 +1404,104 @@ local function closeDialogue()
 end
 
 
-local function runSellOptions(forceGui)
 
+local function runSellOptions(forceGui)
     if sellHookOk and not forceGui then
         return true
     end
 
-    -- GUI-фоллбек (если хук не установлен / не сработал)
-    local b1 = waitOption("sell this", 5) or waitOption("sell", 3)
+    -- GUI fallback
+
+    local b1 =
+        waitOption("sell this", 5)
+        or waitOption("sell", 3)
+
     if not b1 then
-        print("[Sell] DEBUG: no 'sell this' / 'sell' option")
+        print(
+            "[Sell] DEBUG: no 'sell this' / 'sell' option"
+        )
+
         return false
     end
+
     fireClick(b1)
+
     task.wait(0.5)
 
-    local b2 = waitOption("deal", 5) or waitOption("yes", 2) or waitOption("confirm", 2)
+    local b2 =
+        waitOption("deal", 5)
+        or waitOption("yes", 2)
+        or waitOption("confirm", 2)
+
     if not b2 then
-        print("[Sell] DEBUG: no 'deal' option")
+        print(
+            "[Sell] DEBUG: no 'deal' option"
+        )
+
         return false
     end
+
     fireClick(b2)
+
     task.wait(0.5)
 
-    local b3 = waitOption("sell all", 5) or waitOption("all of these", 3) or waitOption("all", 2)
+    local b3 =
+        waitOption("sell all", 5)
+        or waitOption("all of these", 3)
+        or waitOption("all", 2)
+
     if not b3 then
-        print("[Sell] DEBUG: no 'sell all' option")
+        print(
+            "[Sell] DEBUG: no 'sell all' option"
+        )
+
         return false
     end
+
     fireClick(b3)
+
     task.wait(0.5)
+
     return true
 end
 
-local function isSellable(name)
-    local n = string.lower(name)
-    if string.find(n, "lucky", 1, true) then
-        return false
-    end
-    for _, info in ipairs(items_to_farm) do
-        if n == string.lower(info.Name) then
-            return true
-        end
-    end
-    return string.find(n, "rokakaka", 1, true) ~= nil
-end
+
 
 local function getSellPriorityList()
     local list = {}
+
     for _, info in ipairs(items_to_farm) do
-        local count = countTool(info.Name)
-        if count > 0 then
-            local ratio = count / info.Limit
-            local isFull = count >= info.Limit
-            table.insert(list, {
-                Name = info.Name,
-                Count = count,
-                Limit = info.Limit,
-                Ratio = ratio,
-                IsFull = isFull
-            })
-            if isFull then
-                print(string.format("[Sell] FULL detected: %s (%d/%d)", info.Name, count, info.Limit))
+
+        -- SellItems является главным фильтром
+        if isSellable(info.Name) then
+
+            local count = countTool(info.Name)
+
+            if count > 0 then
+                local ratio =
+                    count / info.Limit
+
+                local isFull =
+                    count >= info.Limit
+
+                table.insert(list, {
+                    Name = info.Name,
+                    Count = count,
+                    Limit = info.Limit,
+                    Ratio = ratio,
+                    IsFull = isFull
+                })
+
+                if isFull then
+                    print(
+                        string.format(
+                            "[Sell] FULL detected: %s (%d/%d)",
+                            info.Name,
+                            count,
+                            info.Limit
+                        )
+                    )
+                end
             end
         end
     end
@@ -930,6 +1510,7 @@ local function getSellPriorityList()
         if a.IsFull ~= b.IsFull then
             return a.IsFull
         end
+
         return a.Ratio > b.Ratio
     end)
 
@@ -938,114 +1519,244 @@ end
 
 local function hasHigherPriority(currentName)
     local list = getSellPriorityList()
-    if #list == 0 then return false end
-    if list[1].Name ~= currentName and list[1].IsFull then
+
+    if #list == 0 then
+        return false
+    end
+
+    if list[1].Name ~= currentName
+        and list[1].IsFull then
+
         return true
     end
+
     return false
 end
 
+
+
 local function sellOneType(toolName)
+
+
+    if not isSellable(toolName) then
+        print(
+            "[Sell] BLOCKED by SellItems:",
+            toolName
+        )
+
+        return false
+    end
+
     local maxAttempts = 5
+
     for attempt = 1, maxAttempts do
-        if hasHigherPriority(toolName) then
-            print("[Sell] Higher priority item detected → switching")
+
+        if not isSellable(toolName) then
+            print(
+                "[Sell] Item disabled in SellItems:",
+                toolName
+            )
+
             closeDialogue()
+
+            return false
+        end
+
+        if hasHigherPriority(toolName) then
+            print(
+                "[Sell] Higher priority item detected → switching"
+            )
+
+            closeDialogue()
+
             return false
         end
 
         local before = countTool(toolName)
+
         if before <= 0 then
             return true
         end
 
-        print("[Sell] Attempt", attempt, "for", toolName, "| have:", before, "| hook:", sellHookOk and "ON" or "OFF")
+        print(
+            "[Sell] Attempt",
+            attempt,
+            "for",
+            toolName,
+            "| have:",
+            before,
+            "| hook:",
+            sellHookOk and "ON" or "OFF"
+        )
 
         if not ensureEquipped(toolName) then
-            print("[Sell] DEBUG: failed to equip", toolName)
+            print(
+                "[Sell] DEBUG: failed to equip",
+                toolName
+            )
+
             closeDialogue()
+
             task.wait(0.3)
+
             continue
         end
 
         if not startMerchantTalk() then
-            print("[Sell] DEBUG: failed to open merchant dialogue")
+            print(
+                "[Sell] DEBUG: failed to open merchant dialogue"
+            )
+
             closeDialogue()
+
             task.wait(0.4)
+
             continue
         end
 
         ensureEquipped(toolName)
+
         task.wait(0.1)
 
         local ok = runSellOptions()
+
         if not ok then
-            print("[Sell] DEBUG: dialogue chain failed")
+            print(
+                "[Sell] DEBUG: dialogue chain failed"
+            )
+
             closeDialogue()
+
             task.wait(0.5)
+
             continue
         end
 
         local sold = false
         local guiFallbackDone = false
+
         local t0 = tick()
-        local waitMax = sellHookOk and 4 or 2
+
+        local waitMax =
+            sellHookOk and 4 or 2
+
         while tick() - t0 < waitMax do
             task.wait(0.1)
+
             if countTool(toolName) < before then
                 sold = true
                 break
             end
-            -- Страховка: хук включён, но какой-то шаг всё же показал GUI
-            if sellHookOk and not guiFallbackDone and (tick() - t0) > 1.2 and hasDialogue() then
+
+
+
+            if sellHookOk
+                and not guiFallbackDone
+                and (tick() - t0) > 1.2
+                and hasDialogue() then
+
                 guiFallbackDone = true
-                print("[Sell] Hook missed a dialogue step → GUI fallback")
+
+                print(
+                    "[Sell] Hook missed a dialogue step → GUI fallback"
+                )
+
                 task.spawn(function()
-                    pcall(function() runSellOptions(true) end)
+                    pcall(function()
+                        runSellOptions(true)
+                    end)
                 end)
             end
         end
 
         if sold then
-            print("[Sell] OK sold", toolName)
+            print(
+                "[Sell] OK sold",
+                toolName
+            )
+
             closeDialogue()
+
             if hasHigherPriority(toolName) then
                 return false
             end
+
             return true
         else
-            print("[Sell] DEBUG: item still present after wait → retry")
+            print(
+                "[Sell] DEBUG: item still present after wait → retry"
+            )
+
             closeDialogue()
+
             task.wait(0.6)
         end
     end
 
-    print("[Sell] FAILED after", maxAttempts, "attempts:", toolName)
+    print(
+        "[Sell] FAILED after",
+        maxAttempts,
+        "attempts:",
+        toolName
+    )
+
     closeDialogue()
+
     return false
 end
 
+
+
 local function sellLoop()
     print("[Sell] continuous (priority by fill %)")
+
     while true do
         if getgenv().AutoSell then
-            local priorityList = getSellPriorityList()
+
+            local priorityList =
+                getSellPriorityList()
+
             if #priorityList > 0 then
+
                 local top = priorityList[1]
-                print(string.format("[Sell] Priority → %s (%d/%d) %s",
-                    top.Name, top.Count, top.Limit, top.IsFull and "[FULL]" or ""))
+
+                print(
+                    string.format(
+                        "[Sell] Priority → %s (%d/%d) %s",
+                        top.Name,
+                        top.Count,
+                        top.Limit,
+                        top.IsFull and "[FULL]" or ""
+                    )
+                )
 
                 if top.IsFull then
-                    print("[Sell] Trying to sell FULL stack of", top.Name)
+                    print(
+                        "[Sell] Trying to sell FULL stack of",
+                        top.Name
+                    )
                 end
 
-                local success = pcall(sellOneType, top.Name)
+                local success =
+                    pcall(
+                        sellOneType,
+                        top.Name
+                    )
+
                 if not success then
-                    print("[Sell] sellOneType errored for", top.Name)
+                    print(
+                        "[Sell] sellOneType errored for",
+                        top.Name
+                    )
                 end
-                task.wait(getgenv().SellGap or 0.4)
+
+                task.wait(
+                    getgenv().SellGap or 0.4
+                )
             else
-                task.wait(getgenv().SellRetryEmpty or 2)
+                task.wait(
+                    getgenv().SellRetryEmpty or 2
+                )
             end
         else
             task.wait(1)
@@ -1054,100 +1765,203 @@ local function sellLoop()
 end
 
 
+
 local function countLuckyArrows()
     local count = 0
+
     local function scan(parent)
-        if not parent then return end
+        if not parent then
+            return
+        end
+
         for _, t in ipairs(parent:GetChildren()) do
             if t:IsA("Tool") then
                 local n = string.lower(t.Name)
-                if string.find(n, "lucky arrow", 1, true) then
-                    count = count + 1
+
+                if string.find(
+                    n,
+                    "lucky arrow",
+                    1,
+                    true
+                ) then
+
+                    count += 1
                 end
             end
         end
     end
+
     scan(LP:FindFirstChild("Backpack"))
     scan(LP.Character)
+
     return count
 end
 
 local function getMoney()
-    local stats = LP:FindFirstChild("PlayerStats")
-    local money = stats and stats:FindFirstChild("Money")
+    local stats =
+        LP:FindFirstChild("PlayerStats")
+
+    local money =
+        stats
+        and stats:FindFirstChild("Money")
+
     return money and money.Value or 0
 end
 
 local function buyLuckyArrow()
     local char = LP.Character
-    local re = char and char:FindFirstChild("RemoteEvent")
-    if not re then return false end
+
+    local re =
+        char
+        and char:FindFirstChild("RemoteEvent")
+
+    if not re then
+        return false
+    end
+
     local ok = pcall(function()
-        re:FireServer("PurchaseShopItem", {
-            ItemName = "1x Lucky Arrow"
-        })
+        re:FireServer(
+            "PurchaseShopItem",
+            {
+                ItemName = "1x Lucky Arrow"
+            }
+        )
     end)
+
     return ok
 end
 
 local function buyLoop()
-    print("[Buy] Lucky Arrow | max", getgenv().MaxLuckyArrows or 9)
+    print(
+        "[Buy] Lucky Arrow | max",
+        getgenv().MaxLuckyArrows or 9
+    )
+
     while true do
         if getgenv().AutoBuyLuckyArrow then
-            local have = countLuckyArrows()
-            local maxN = getgenv().MaxLuckyArrows or 9
-            local price = getgenv().LuckyArrowPrice or 75000
-            local money = getMoney()
-            if have < maxN and money >= price then
-                print("[Buy] Lucky Arrow | have:", have, "| money:", money)
+
+            local have =
+                countLuckyArrows()
+
+            local maxN =
+                getgenv().MaxLuckyArrows or 9
+
+            local price =
+                getgenv().LuckyArrowPrice or 75000
+
+            local money =
+                getMoney()
+
+            if have < maxN
+                and money >= price then
+
+                print(
+                    "[Buy] Lucky Arrow | have:",
+                    have,
+                    "| money:",
+                    money
+                )
+
                 buyLuckyArrow()
+
                 task.wait(1.2)
             end
         end
-        task.wait(getgenv().BuyCheckInterval or 2)
+
+        task.wait(
+            getgenv().BuyCheckInterval or 2
+        )
     end
 end
+
 
 
 local function walkForward(duration)
     duration = duration or 7
-    local char = LP.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hum or not hrp then return end
 
-    print("[Init] Walking forward for", duration, "seconds...")
-    local endTime = tick() + duration
+    local char = LP.Character
+
+    if not char then
+        return
+    end
+
+    local hum =
+        char:FindFirstChildOfClass("Humanoid")
+
+    local hrp =
+        char:FindFirstChild("HumanoidRootPart")
+
+    if not hum or not hrp then
+        return
+    end
+
+    print(
+        "[Init] Walking forward for",
+        duration,
+        "seconds..."
+    )
+
+    local endTime =
+        tick() + duration
+
     while tick() < endTime do
         pcall(function()
-            local look = hrp.CFrame.LookVector
-            hum:Move(Vector3.new(look.X, 0, look.Z).Unit, false)
+            local look =
+                hrp.CFrame.LookVector
+
+            hum:Move(
+                Vector3.new(
+                    look.X,
+                    0,
+                    look.Z
+                ).Unit,
+                false
+            )
         end)
+
         task.wait(0.1)
     end
+
     pcall(function()
-        hum:Move(Vector3.zero, false)
+        hum:Move(
+            Vector3.zero,
+            false
+        )
     end)
+
     print("[Init] Walk finished")
 end
 
+
+
 task.wait(1.2)
+
 walkForward(7)
 
-local currentJobId = tostring(game.JobId)
+local currentJobId =
+    tostring(game.JobId)
 
-if currentJobId and currentJobId ~= "" and currentJobId ~= "0" then
+if currentJobId
+    and currentJobId ~= ""
+    and currentJobId ~= "0" then
+
     if isServerVisited(currentJobId) then
-        print("[Init] Current server already visited by another account → hopping away")
+        print(
+            "[Init] Current server already visited by another account → hopping away"
+        )
+
         task.wait(0.8)
+
         hopServer(true)
     else
-        print("[Init] New server, marking as visited and staying:", currentJobId)
+        print(
+            "[Init] New server, marking as visited and staying:",
+            currentJobId
+        )
+
         markServerVisited(currentJobId)
     end
 end
-
 
 task.spawn(farmLoop)
 task.spawn(sellLoop)
