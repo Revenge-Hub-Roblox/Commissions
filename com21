@@ -13,11 +13,11 @@ getgenv().NoItemsTimeout = 5
 getgenv().AutoAnswerAllDialogues = true
 
 
-getgenv().SellItems = {
+getgenv().SellItems = getgenv().SellItems or {
     ["Gold Coin"] = true,
     ["Rokakaka"] = true,
     ["Pure Rokakaka"] = true,
-    ["Mysterious Arrow"] = false,
+    ["Mysterious Arrow"] = true,
     ["Diamond"] = true,
     ["Ancient Scroll"] = true,
     ["Caesar's Headband"] = true,
@@ -28,7 +28,6 @@ getgenv().SellItems = {
     ["Clackers"] = true,
     ["Steel Ball"] = true,
     ["Dio's Diary"] = true,
-
     ["Zepellin's Headband"] = false,
     ["Lucky Arrow"] = false,
     ["Lucky Stone Mask"] = false,
