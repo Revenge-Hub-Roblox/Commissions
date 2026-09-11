@@ -65,15 +65,21 @@ game:GetService("CoreGui").DescendantAdded:Connect(function(obj)
 
         local text = msg.Text
 
-        if text:match("kick")
+        if (text:match("kick")
             or text:match("You")
             or text:match("conn")
-            or text:match("rejoin") then
+            or text:match("rejoin"))
+            and getgenv().__FarmTeleporting ~= true then
 
-            game:GetService("TeleportService"):Teleport(
-                2809202155,
-                game.Players.LocalPlayer
-            )
+
+            getgenv().__FarmTeleporting = true
+
+            pcall(function()
+                game:GetService("TeleportService"):Teleport(
+                    2809202155,
+                    game.Players.LocalPlayer
+                )
+            end)
         end
     end
 end)
@@ -615,282 +621,569 @@ end
 
 
 
-local VISITED_FILE = "visited_servers.json"
-local CLEAR_EVERY = 3
+local VISITED_FILE = "visited_servers_v2.json"
+local HOP_LOCK_FOLDER = "serverhop.lock"
 local PlaceId = game.PlaceId
 
-local function loadVisited()
-    if isfile and isfile(VISITED_FILE) then
-        local ok, data = pcall(function()
-            return HttpService:JSONDecode(
-                readfile(VISITED_FILE)
-            )
-        end)
 
-        if ok
-            and type(data) == "table"
-            and type(data.servers) == "table" then
 
-            return data
-        end
-    end
+local VISITED_TTL = 10 * 60
+local RESERVATION_TTL = 15
+local LOCK_TTL = 8
+local HOP_MAX_TRIES = 12
+local TELEPORT_GRACE = 10
+local API_RETRY_DELAY = 0.45
+local SAME_TARGET_COOLDOWN = 1.25
 
-    return {
-        servers = {},
-        hopCount = 0
-    }
-end
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local LP = game.Players.LocalPlayer
 
-local function saveVisited(data)
-    if writefile then
-        pcall(function()
-            writefile(
-                VISITED_FILE,
-                HttpService:JSONEncode(data)
-            )
-        end)
-    end
-end
-
-local function isServerVisited(sid)
-    local data = loadVisited()
-
-    return data.servers[tostring(sid)] == true
-end
-
-local function markServerVisited(sid)
-    sid = tostring(sid)
-
-    local data = loadVisited()
-
-    data.servers[sid] = true
-    data.hopCount = (data.hopCount or 0) + 1
-
-    if data.hopCount >= CLEAR_EVERY then
-        print(
-            "[Hop] Cleared visited list after",
-            CLEAR_EVERY,
-            "successful hops"
-        )
-
-        data.servers = {}
-        data.hopCount = 0
-    end
-
-    saveVisited(data)
-
-    print("[Hop] Marked server as visited:", sid)
-end
-
-local function unmarkServer(sid)
-    sid = tostring(sid)
-
-    local data = loadVisited()
-
-    if data.servers[sid] then
-        data.servers[sid] = nil
-
-        saveVisited(data)
-
-        print("[Hop] Unmarked server (teleport failed):", sid)
-    end
-end
-
+local clientToken = tostring(LP.UserId) .. ":" .. tostring(game.JobId) .. ":" .. tostring(math.random(100000, 999999))
 local cursor = ""
 local lastTriedServer = nil
 local teleportInProgress = false
 local teleportFailed = false
+local teleportFailureMessage = nil
+local teleportGeneration = 0
+getgenv().__FarmTeleporting = false
 
-TeleportService.TeleportInitFailed:Connect(
-    function(player, teleportResult, errorMessage)
-        if player ~= LP then
-            return
-        end
+local function now()
+    return os.time()
+end
 
-        teleportFailed = true
-        teleportInProgress = false
-
-        print(
-            "[Hop] TeleportInitFailed:",
-            tostring(teleportResult),
-            tostring(errorMessage)
-        )
-
-        if lastTriedServer then
-            unmarkServer(lastTriedServer)
-            lastTriedServer = nil
-        end
+local function safeReadState()
+    if not isfile or not isfile(VISITED_FILE) then
+        return {
+            version = 2,
+            visited = {},
+            reserved = {}
+        }
     end
-)
 
-local function hopServer(force)
-    if teleportInProgress and not force then
-        print("[Hop] Teleport already in progress, skipping")
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(readfile(VISITED_FILE))
+    end)
+
+    if ok and type(data) == "table" then
+        data.version = 2
+        data.visited = type(data.visited) == "table" and data.visited or {}
+        data.reserved = type(data.reserved) == "table" and data.reserved or {}
+        return data
+    end
+
+    return {
+        version = 2,
+        visited = {},
+        reserved = {}
+    }
+end
+
+local function safeWriteState(data)
+    if not writefile then
+        return false
+    end
+
+    local ok = pcall(function()
+        writefile(VISITED_FILE, HttpService:JSONEncode(data))
+    end)
+
+    return ok
+end
+
+local function acquireStateLock(timeout)
+    timeout = timeout or 2
+
+    if not (makefolder and isfolder and delfolder) then
+        return true, false
+    end
+
+    local started = tick()
+
+    while tick() - started < timeout do
+        local created = pcall(function()
+            makefolder(HOP_LOCK_FOLDER)
+        end)
+
+        if created and isfolder(HOP_LOCK_FOLDER) then
+
+            if writefile then
+                pcall(function()
+                    writefile(HOP_LOCK_FOLDER .. "/owner.txt", clientToken .. "|" .. tostring(now()))
+                end)
+            end
+
+            return true, true
+        end
+
+        task.wait(0.035 + math.random() * 0.055)
+    end
+
+    return false, true
+end
+
+local function releaseStateLock(locked)
+    if not locked then
         return
     end
+
+    if delfolder and isfolder and isfolder(HOP_LOCK_FOLDER) then
+        pcall(function()
+            delfolder(HOP_LOCK_FOLDER)
+        end)
+    end
+end
+
+local function pruneState(data, currentTime)
+    currentTime = currentTime or now()
+
+    for sid, stamp in pairs(data.visited) do
+        if type(stamp) ~= "number" or currentTime - stamp >= VISITED_TTL then
+            data.visited[sid] = nil
+        end
+    end
+
+    for sid, reservation in pairs(data.reserved) do
+        if type(reservation) ~= "table"
+            or type(reservation.expires) ~= "number"
+            or reservation.expires <= currentTime then
+            data.reserved[sid] = nil
+        end
+    end
+end
+
+local function updateState(mutator)
+    local locked, lockSupported = acquireStateLock(2)
+
+    if not locked and lockSupported then
+        return false
+    end
+
+    local ok, result = pcall(function()
+        local data = safeReadState()
+        pruneState(data)
+        local value = mutator(data)
+        safeWriteState(data)
+        return value
+    end)
+
+    releaseStateLock(lockSupported and locked)
+
+    if not ok then
+        return false
+    end
+
+    return result
+end
+
+local function isServerVisited(sid)
+    sid = tostring(sid)
+
+    local locked, lockSupported = acquireStateLock(1)
+    if not locked and lockSupported then
+        return true
+    end
+
+    local data = safeReadState()
+    pruneState(data)
+    local result = type(data.visited[sid]) == "number"
+        and now() - data.visited[sid] < VISITED_TTL
+
+    safeWriteState(data)
+    releaseStateLock(lockSupported and locked)
+
+    return result
+end
+
+local function reserveServer(sid)
+    sid = tostring(sid)
+
+    return updateState(function(data)
+        local current = now()
+        local reservation = data.reserved[sid]
+
+        if reservation
+            and reservation.owner ~= clientToken
+            and type(reservation.expires) == "number"
+            and reservation.expires > current then
+            return false
+        end
+
+        data.reserved[sid] = {
+            owner = clientToken,
+            expires = current + RESERVATION_TTL
+        }
+
+
+        data.visited[sid] = current
+        return true
+    end) == true
+end
+
+local function releaseReservation(sid, markCooldown)
+    if not sid then
+        return
+    end
+
+    sid = tostring(sid)
+
+    updateState(function(data)
+        local reservation = data.reserved[sid]
+
+        if reservation and reservation.owner == clientToken then
+            data.reserved[sid] = nil
+        end
+
+        if markCooldown then
+            data.visited[sid] = now()
+        end
+    end)
+end
+
+local function markCurrentServer(sid)
+    if not sid or sid == "" or sid == "0" then
+        return
+    end
+
+    sid = tostring(sid)
+
+    updateState(function(data)
+        data.visited[sid] = now()
+        local reservation = data.reserved[sid]
+        if reservation and reservation.owner == clientToken then
+            data.reserved[sid] = nil
+        end
+    end)
+
+    print("[Hop] Marked current server:", sid)
+end
+
+local function countOtherReservations(data, sid)
+    local reservation = data.reserved[tostring(sid)]
+    if not reservation then
+        return 0
+    end
+
+    if reservation.owner == clientToken then
+        return 0
+    end
+
+    if type(reservation.expires) ~= "number" or reservation.expires <= now() then
+        return 0
+    end
+
+    return 1
+end
+
+local function getServerState(sid)
+    sid = tostring(sid)
+
+    local locked, lockSupported = acquireStateLock(1)
+    if not locked and lockSupported then
+        return true, 1
+    end
+
+    local data = safeReadState()
+    pruneState(data)
+
+    local visited = data.visited[sid] ~= nil
+    local reserved = countOtherReservations(data, sid)
+
+    safeWriteState(data)
+    releaseStateLock(lockSupported and locked)
+
+    return visited, reserved
+end
+
+local function getStateSnapshot()
+    local locked, lockSupported = acquireStateLock(1)
+    if not locked and lockSupported then
+        return nil
+    end
+
+    local data = safeReadState()
+    pruneState(data)
+
+    local snapshot = {
+        visited = {},
+        reserved = {}
+    }
+
+    for sid, stamp in pairs(data.visited) do
+        snapshot.visited[tostring(sid)] = stamp
+    end
+
+    for sid, reservation in pairs(data.reserved) do
+        if type(reservation) == "table"
+            and type(reservation.expires) == "number"
+            and reservation.expires > now() then
+            snapshot.reserved[tostring(sid)] = reservation
+        end
+    end
+
+    safeWriteState(data)
+    releaseStateLock(lockSupported and locked)
+
+    return snapshot
+end
+
+TeleportService.TeleportInitFailed:Connect(function(player, teleportResult, errorMessage)
+    if player ~= LP then
+        return
+    end
+
+    teleportFailed = true
+    teleportInProgress = false
+    teleportFailureMessage = tostring(errorMessage or teleportResult or "unknown")
+
+    print(
+        "[Hop] TeleportInitFailed:",
+        tostring(teleportResult),
+        tostring(errorMessage)
+    )
+
+    if lastTriedServer then
+
+        releaseReservation(lastTriedServer, true)
+        lastTriedServer = nil
+    end
+end)
+
+local function teleportToServer(sid)
+    teleportGeneration += 1
+    local generation = teleportGeneration
+
+    teleportInProgress = true
+    getgenv().__FarmTeleporting = true
+    teleportFailed = false
+    teleportFailureMessage = nil
+
+    local callOk, callErr = pcall(function()
+        TeleportService:TeleportToPlaceInstance(
+            PlaceId,
+            sid,
+            LP
+        )
+    end)
+
+    if not callOk then
+        teleportInProgress = false
+        getgenv().__FarmTeleporting = false
+        print("[Hop] Teleport call failed:", tostring(callErr))
+        releaseReservation(sid, true)
+        return false
+    end
+
+    print("[Hop] Teleport request accepted for:", sid)
+
+
+    local started = tick()
+    while tick() - started < TELEPORT_GRACE do
+        if teleportFailed then
+            return false
+        end
+
+        if tostring(game.JobId) == tostring(sid) then
+            teleportInProgress = false
+            getgenv().__FarmTeleporting = true
+            return true
+        end
+
+
+        if generation ~= teleportGeneration then
+            return false
+        end
+
+        task.wait(0.15)
+    end
+
+
+    print("[Hop] Teleport still pending after 10s; keeping reservation and stopping retries")
+    return true
+end
+
+local function fetchServerPage()
+    local url =
+        "https://games.roblox.com/v1/games/"
+        .. PlaceId
+        .. "/servers/Public?sortOrder="
+        .. tostring(getgenv().sortOrder or "Desc")
+        .. "&limit=100"
+
+    if cursor ~= "" then
+        url = url .. "&cursor=" .. cursor
+    end
+
+    local ok, data = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet(url))
+    end)
+
+    if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
+        return nil
+    end
+
+    if data.nextPageCursor and data.nextPageCursor ~= "null" then
+        cursor = tostring(data.nextPageCursor)
+    else
+        cursor = ""
+    end
+
+    return data.data
+end
+
+local function hopServer(force)
+    if teleportInProgress then
+        print("[Hop] Teleport already in progress, skipping")
+        return false
+    end
+
+
+    task.wait(math.random(5, 35) / 100)
 
     print("[Hop] Searching for fullest available server...")
 
     local tries = 0
-    local maxTries = 20
-
-    while tries < maxTries do
+    while tries < HOP_MAX_TRIES do
         tries += 1
-        teleportFailed = false
 
-        local ok, data = pcall(function()
-            local url
-
-            if cursor ~= "" then
-                url =
-                    "https://games.roblox.com/v1/games/"
-                    .. PlaceId
-                    .. "/servers/Public?sortOrder="
-                    .. (getgenv().sortOrder or "Desc")
-                    .. "&limit=100&cursor="
-                    .. cursor
-            else
-                url =
-                    "https://games.roblox.com/v1/games/"
-                    .. PlaceId
-                    .. "/servers/Public?sortOrder="
-                    .. (getgenv().sortOrder or "Desc")
-                    .. "&limit=100"
-            end
-
-            return HttpService:JSONDecode(
-                game:HttpGet(url)
-            )
-        end)
-
-        if not ok or not data or not data.data then
-            print("[Hop] Failed to get server list, retrying...")
-
-            task.wait(2)
-
+        local servers = fetchServerPage()
+        if not servers then
+            print("[Hop] Failed to get server list; retry", tries)
+            task.wait(API_RETRY_DELAY + math.random() * 0.25)
             continue
         end
 
-        if data.nextPageCursor
-            and data.nextPageCursor ~= "null" then
-
-            cursor = data.nextPageCursor
-        else
-            cursor = ""
-        end
-
-        table.sort(data.data, function(a, b)
-            return (tonumber(a.playing) or 0)
-                > (tonumber(b.playing) or 0)
+        table.sort(servers, function(a, b)
+            return (tonumber(a.playing) or 0) > (tonumber(b.playing) or 0)
         end)
 
-        local found = false
 
-        for _, server in ipairs(data.data) do
-            local sid = tostring(server.id)
+        local state = getStateSnapshot()
+        if not state then
+            print("[Hop] Shared state busy; retrying page quickly")
+            task.wait(0.15 + math.random() * 0.2)
+            continue
+        end
+
+        local best = nil
+        local bestScore = -math.huge
+
+        for _, server in ipairs(servers) do
+            local sid = tostring(server.id or "")
             local playing = tonumber(server.playing) or 0
             local maxP = tonumber(server.maxPlayers) or 0
 
-            if sid == tostring(game.JobId) then
-                continue
-            end
+            if sid ~= ""
+                and sid ~= tostring(game.JobId)
+                and maxP > 0
+                and playing < maxP then
 
-            if maxP > playing
-                and not isServerVisited(sid) then
+                local visited = type(state.visited[sid]) == "number"
+                    and now() - state.visited[sid] < VISITED_TTL
+                local reservation = state.reserved[sid]
+                local reservations = 0
 
-                found = true
-
-                lastTriedServer = sid
-
-                markServerVisited(sid)
-
-                print(
-                    string.format(
-                        "[Hop] Trying server %s (%d/%d) ...",
-                        sid,
-                        playing,
-                        maxP
-                    )
-                )
-
-                teleportInProgress = true
-                teleportFailed = false
-
-                local teleportOk = pcall(function()
-                    TeleportService:TeleportToPlaceInstance(
-                        PlaceId,
-                        sid,
-                        LP
-                    )
-                end)
-
-                if not teleportOk then
-                    print("[Hop] Teleport call failed")
-
-                    unmarkServer(sid)
-
-                    lastTriedServer = nil
-                    teleportInProgress = false
-
-                    task.wait(1)
-
-                    break
+                if reservation
+                    and reservation.owner ~= clientToken
+                    and type(reservation.expires) == "number"
+                    and reservation.expires > now() then
+                    reservations = 1
                 end
 
-                local waitStart = tick()
+                local freeSlots = maxP - playing - reservations
 
-                while tick() - waitStart < 8 do
-                    if teleportFailed then
-                        break
+
+                if not visited
+                    and freeSlots >= 1 then
+
+                    local score = playing
+                    if force then
+                        score += 0.001
                     end
 
-                    task.wait(0.4)
+                    if score > bestScore then
+                        bestScore = score
+                        best = {
+                            id = sid,
+                            playing = playing,
+                            maxPlayers = maxP,
+                            freeSlots = freeSlots
+                        }
+                    end
+                end
+            end
+        end
+
+        if best then
+
+            if reserveServer(best.id) then
+                lastTriedServer = best.id
+
+                print(string.format(
+                    "[Hop] Reserved %s (%d/%d, estimated free after reservations: %d)",
+                    best.id,
+                    best.playing,
+                    best.maxPlayers,
+                    best.freeSlots
+                ))
+
+                local success = teleportToServer(best.id)
+
+                if success then
+
+                    if not teleportFailed then
+                        print("[Hop] Teleport pending/accepted; stopping further hops")
+                        return true
+                    end
                 end
 
                 if teleportFailed then
-                    print(
-                        "[Hop] Server was full / teleport failed → trying next"
-                    )
-
-                    task.wait(1.5)
-
-                    break
+                    print("[Hop] Target rejected/full:", teleportFailureMessage or "unknown")
+                else
+                    print("[Hop] Teleport request could not be completed")
                 end
 
-                print(
-                    "[Hop] Teleport seems stuck, unmarking and retrying..."
-                )
-
-                unmarkServer(sid)
-
+                releaseReservation(best.id, true)
                 lastTriedServer = nil
                 teleportInProgress = false
+                teleportFailed = false
+                teleportFailureMessage = nil
 
-                task.wait(1)
-
-                break
+                task.wait(SAME_TARGET_COOLDOWN + math.random() * 0.35)
+                continue
             end
+
+            task.wait(0.08 + math.random() * 0.15)
+            continue
         end
 
-        if not found then
-            print(
-                "[Hop] No suitable servers on this page, next page..."
-            )
+        if cursor == "" then
 
-            task.wait(1.5)
+            cursor = ""
+            task.wait(0.35 + math.random() * 0.45)
+        else
+            task.wait(0.15 + math.random() * 0.25)
         end
     end
 
-    print("[Hop] Fallback: simple rejoin")
 
-    pcall(function()
-        TeleportService:Teleport(
-            PlaceId,
-            LP
-        )
-    end)
+    if not teleportInProgress then
+        teleportInProgress = true
+        print("[Hop] No suitable reserved target found; fallback rejoin")
+
+        local ok, err = pcall(function()
+            TeleportService:Teleport(PlaceId, LP)
+        end)
+
+        if not ok then
+            teleportInProgress = false
+            getgenv().__FarmTeleporting = false
+            print("[Hop] Fallback rejoin failed:", tostring(err))
+        end
+    end
+
+    return false
 end
-
 
 
 local function getItemSpawns(itemName)
@@ -1409,7 +1702,6 @@ local function runSellOptions(forceGui)
         return true
     end
 
-    -- GUI fallback
 
     local b1 =
         waitOption("sell this", 5)
@@ -1471,7 +1763,6 @@ local function getSellPriorityList()
 
     for _, info in ipairs(items_to_farm) do
 
-        -- SellItems является главным фильтром
         if isSellable(info.Name) then
 
             local count = countTool(info.Name)
@@ -1875,67 +2166,27 @@ end
 
 
 
-local function walkForward(duration)
-    duration = duration or 7
+local STARTUP_WAIT = 7
 
-    local char = LP.Character
+local function waitBeforeStart(duration)
+    duration = duration or STARTUP_WAIT
 
-    if not char then
-        return
-    end
+    print("[Init] Waiting", duration, "seconds before starting farm...")
 
-    local hum =
-        char:FindFirstChildOfClass("Humanoid")
-
-    local hrp =
-        char:FindFirstChild("HumanoidRootPart")
-
-    if not hum or not hrp then
-        return
-    end
-
-    print(
-        "[Init] Walking forward for",
-        duration,
-        "seconds..."
-    )
-
-    local endTime =
-        tick() + duration
-
+    local endTime = tick() + duration
     while tick() < endTime do
-        pcall(function()
-            local look =
-                hrp.CFrame.LookVector
-
-            hum:Move(
-                Vector3.new(
-                    look.X,
-                    0,
-                    look.Z
-                ).Unit,
-                false
-            )
-        end)
-
-        task.wait(0.1)
+        task.wait(0.2)
     end
 
-    pcall(function()
-        hum:Move(
-            Vector3.zero,
-            false
-        )
-    end)
-
-    print("[Init] Walk finished")
+    print("[Init] Startup wait finished")
 end
+
 
 
 
 task.wait(1.2)
 
-walkForward(7)
+waitBeforeStart(STARTUP_WAIT)
 
 local currentJobId =
     tostring(game.JobId)
@@ -1958,7 +2209,7 @@ if currentJobId
             currentJobId
         )
 
-        markServerVisited(currentJobId)
+        markCurrentServer(currentJobId)
     end
 end
 
