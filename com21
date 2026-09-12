@@ -1,7 +1,7 @@
-getgenv().HopMinPlayers = 8
-getgenv().HopMaxPlayers = 15
+getgenv().HopMinPlayers  = 8
+getgenv().HopMaxPlayers  = 15
 getgenv().HopTargetPlayers = nil
-getgenv().HopScanPages = 5
+getgenv().HopScanPages   = 5
 
 getgenv().waitUntilCollect = 0.5
 getgenv().AutoSell = true
@@ -17,10 +17,13 @@ getgenv().HopWhenNoItems = true
 getgenv().NoItemsTimeout = 5
 getgenv().AutoAnswerAllDialogues = true
 
-getgenv().FullExpiry = 120
-getgenv().PresenceExpiry = 45
-getgenv().PresenceUpdate = 4
 
+getgenv().ClaimExpiry = 300   
+getgenv().FullExpiry  = 120   
+getgenv().MaxHopPages = 25    
+
+--// Если нужно, чтобы скрипт сам перезапускался после телепорта:
+-- getgenv().OnTeleportScript = 'loadstring(game:HttpGet("ССЫЛКА_НА_СКРИПТ"))()'
 if getgenv().OnTeleportScript and queue_on_teleport then
     pcall(function()
         queue_on_teleport(getgenv().OnTeleportScript)
@@ -65,12 +68,14 @@ local items_to_farm = {
     {Name = "Dio's Diary",                     Limit = 10},
 }
 
+
 local SharedHop = {
     failed = false,
     full = false,
 }
 
 local lastRejoinAt = 0
+
 
 game:GetService("CoreGui").DescendantAdded:Connect(function(obj)
     if obj.Name ~= "ErrorPrompt" then
@@ -206,6 +211,7 @@ task.spawn(function()
         end
     end
 end)
+
 
 pcall(function()
     local oldNamecall
@@ -655,159 +661,189 @@ do
     print("[FPS] Extreme optimizer enabled")
 end
 
+
+
 local PlaceId = game.PlaceId
-local ACC_DIR = "hop_accs_" .. PlaceId
-local FULL_EXPIRY = getgenv().FullExpiry or 120
-local PRESENCE_EXPIRY = getgenv().PresenceExpiry or 45
-local PRESENCE_UPDATE = getgenv().PresenceUpdate or 4
+local HOP_FILE = "hop_registry_" .. PlaceId .. ".json"
+
+local CLAIM_EXPIRY   = getgenv().ClaimExpiry or 300
+local FULL_EXPIRY    = getgenv().FullExpiry or 120
+local MAX_PAGES      = getgenv().MaxHopPages or 25
 local MAX_CANDIDATES = 60
 
 local useFS = type(writefile) == "function"
     and type(readfile) == "function"
     and type(isfile) == "function"
 
-local useDir = useFS
-    and type(listfiles) == "function"
-    and type(isfolder) == "function"
-
-if useDir
-    and type(makefolder) == "function"
-    and not isfolder(ACC_DIR) then
-
-    pcall(function()
-        makefolder(ACC_DIR)
-    end)
-end
-
-local myPresence = {
-    u = LP.UserId,
-    s = tostring(game.JobId),
-    t = os.time(),
-    full = {}
-}
+local memStore = { claims = {}, full = {} }
 
 local hopInProgress = false
 local lastTeleportResult = nil
 local cursor = ""
 
-local function writeMyPresence(sidOverride)
+local function pruneData(data)
     local now = os.time()
 
-    for sid, t in pairs(myPresence.full) do
+    for sid, c in pairs(data.claims) do
+        if type(c) ~= "table"
+            or (now - (tonumber(c.t) or 0)) > CLAIM_EXPIRY then
+
+            data.claims[sid] = nil
+        end
+    end
+
+    for sid, t in pairs(data.full) do
         if (now - (tonumber(t) or 0)) > FULL_EXPIRY then
-            myPresence.full[sid] = nil
+            data.full[sid] = nil
         end
     end
 
-    myPresence.t = now
-    myPresence.s = tostring(sidOverride or game.JobId)
+    local n = 0
+    for _ in pairs(data.claims) do
+        n += 1
+    end
 
-    if useFS then
-        pcall(function()
-            writefile(
-                ACC_DIR .. "/acc_" .. LP.UserId .. ".json",
-                HttpService:JSONEncode(myPresence)
-            )
+    if n > 400 then
+        local entries = {}
+
+        for sid, c in pairs(data.claims) do
+            table.insert(entries, {
+                sid = sid,
+                t = tonumber(c.t) or 0
+            })
+        end
+
+        table.sort(entries, function(a, b)
+            return a.t < b.t
         end)
+
+        for i = 1, math.floor(#entries / 2) do
+            data.claims[entries[i].sid] = nil
+        end
     end
 end
 
-local function forEachOtherAccount(exceptUserId, cb)
-    if not useDir then
+local function loadHopData()
+    if not useFS then
+        return memStore
+    end
+
+    local ok, data = pcall(function()
+        if not isfile(HOP_FILE) then
+            return nil
+        end
+
+        return HttpService:JSONDecode(readfile(HOP_FILE))
+    end)
+
+    if ok
+        and type(data) == "table"
+        and type(data.claims) == "table"
+        and type(data.full) == "table" then
+
+        return data
+    end
+
+    return { claims = {}, full = {} }
+end
+
+local function saveHopData(data)
+    pruneData(data)
+
+    if not useFS then
+        memStore = data
         return
     end
 
-    if not isfolder(ACC_DIR) then
-        return
-    end
-
-    local ok, files = pcall(listfiles, ACC_DIR)
-
-    if not ok or type(files) ~= "table" then
-        return
-    end
-
-    local now = os.time()
-
-    for _, path in ipairs(files) do
-        if tostring(path):find("acc_", 1, true) then
-            local ok2, data = pcall(function()
-                return HttpService:JSONDecode(readfile(path))
-            end)
-
-            if ok2
-                and type(data) == "table"
-                and tonumber(data.u)
-                and tonumber(data.u) ~= exceptUserId
-                and (now - (tonumber(data.t) or 0)) <= PRESENCE_EXPIRY then
-
-                cb(data)
-            end
-        end
-    end
-end
-
-local function anyAccountOnServer(sid, exceptUserId)
-    local found = false
-
-    forEachOtherAccount(exceptUserId, function(d)
-        if tostring(d.s) == tostring(sid) then
-            found = true
-        end
+    pcall(function()
+        writefile(HOP_FILE, HttpService:JSONEncode(data))
     end)
-
-    return found
 end
 
-local function getAccountsOnServer(sid, exceptUserId)
-    local res = {}
+local function isClaimedFresh(sid)
+    local data = loadHopData()
+    local c = data.claims[sid]
 
-    forEachOtherAccount(exceptUserId, function(d)
-        if tostring(d.s) == tostring(sid) then
-            table.insert(res, tonumber(d.u))
-        end
-    end)
+    if not c then
+        return false
+    end
 
-    return res
+    if type(c) ~= "table"
+        or (os.time() - (tonumber(c.t) or 0)) > CLAIM_EXPIRY then
+
+        data.claims[sid] = nil
+        saveHopData(data)
+
+        return false
+    end
+
+    return true
 end
 
-local function isRecentlyFull(sid)
-    local now = os.time()
-    local hit = false
 
-    forEachOtherAccount(-1, function(d)
-        local t = type(d.full) == "table" and d.full[tostring(sid)]
+local function claimServer(sid)
+    for _ = 1, 3 do
+        local data = loadHopData()
 
-        if t and (now - (tonumber(t) or 0)) <= FULL_EXPIRY then
-            hit = true
-        end
-    end)
+        data.claims[sid] = {
+            u = LP.UserId,
+            t = os.time()
+        }
 
-    if not hit then
-        local t = myPresence.full[tostring(sid)]
+        saveHopData(data)
 
-        if t and (now - t) <= FULL_EXPIRY then
-            hit = true
+        task.wait(0.03 + math.random() * 0.07)
+
+        local check = loadHopData()
+        local c = check.claims[sid]
+
+        if c and type(c) == "table" and c.u == LP.UserId then
+            return true
         end
     end
 
-    return hit
+    return false
 end
+
+
+local function releaseServer(sid)
+    local data = loadHopData()
+    local c = data.claims[sid]
+
+    if c and type(c) == "table" and c.u == LP.UserId then
+        data.claims[sid] = nil
+        saveHopData(data)
+    end
+end
+
 
 local function markServerFull(sid)
-    myPresence.full[tostring(sid)] = os.time()
+    local data = loadHopData()
 
-    writeMyPresence()
+    data.full[sid] = os.time()
+    saveHopData(data)
 
     print("[Hop] Marked FULL for", FULL_EXPIRY, "s:", sid)
 end
 
-task.spawn(function()
-    while true do
-        writeMyPresence()
-        task.wait(PRESENCE_UPDATE)
+local function isRecentlyFull(sid)
+    local data = loadHopData()
+    local t = data.full[sid]
+
+    if not t then
+        return false
     end
-end)
+
+    if (os.time() - (tonumber(t) or 0)) > FULL_EXPIRY then
+        data.full[sid] = nil
+        saveHopData(data)
+
+        return false
+    end
+
+    return true
+end
+
 
 TeleportService.TeleportInitFailed:Connect(
     function(player, teleportResult, errorMessage)
@@ -888,6 +924,7 @@ local function hopServer(force)
 
     hopInProgress = true
 
+
     task.wait(math.random() + (LP.UserId % 10) * 0.15)
 
     cursor = ""
@@ -903,6 +940,7 @@ local function hopServer(force)
         "[Hop] Target range %d-%d players, scanning %d pages...",
         MIN_P, MAX_P, SCAN_PAGES
     ))
+
 
     local candidates = {}
     local pagesFetched = 0
@@ -942,7 +980,7 @@ local function hopServer(force)
                 local maxP = tonumber(srv.maxPlayers) or 0
 
                 if maxP > playing
-                    and not anyAccountOnServer(sid, LP.UserId)
+                    and not isClaimedFresh(sid)
                     and not isRecentlyFull(sid) then
 
                     table.insert(candidates, {
@@ -963,13 +1001,17 @@ local function hopServer(force)
         task.wait(0.3)
     end
 
+
     table.sort(candidates, function(a, b)
+
         if a.inRange ~= b.inRange then
             return a.inRange
         end
 
         if a.inRange then
+
             if TARGET then
+
                 local ta = math.abs(a.playing - TARGET)
                 local tb = math.abs(b.playing - TARGET)
 
@@ -980,6 +1022,7 @@ local function hopServer(force)
 
             return a.playing > b.playing
         end
+
 
         local da = distToRange(a.playing, MIN_P, MAX_P)
         local db = distToRange(b.playing, MIN_P, MAX_P)
@@ -1007,6 +1050,7 @@ local function hopServer(force)
         MAX_P
     ))
 
+
     local candidatesTried = 0
     local fallbackReason = "no candidates"
 
@@ -1018,7 +1062,13 @@ local function hopServer(force)
             break
         end
 
-        if anyAccountOnServer(cand.id, LP.UserId) or isRecentlyFull(cand.id) then
+
+        if isClaimedFresh(cand.id) or isRecentlyFull(cand.id) then
+            continue
+        end
+
+        if not claimServer(cand.id) then
+            print("[Hop] Claim race lost on", cand.id, "→ next")
             continue
         end
 
@@ -1046,6 +1096,7 @@ local function hopServer(force)
 
         if not ok then
             print("[Hop] Teleport call errored → next")
+            releaseServer(cand.id)
             task.wait(0.5)
             continue
         end
@@ -1060,6 +1111,8 @@ local function hopServer(force)
         end
 
         if SharedHop.failed or SharedHop.full then
+            releaseServer(cand.id)
+
             if SharedHop.full
                 or lastTeleportResult == Enum.TeleportResult.GameIsFull then
 
@@ -1079,6 +1132,7 @@ local function hopServer(force)
         end
 
         print("[Hop] No result in 8s → moving on")
+        releaseServer(cand.id)
         task.wait(0.5)
         continue
     end
@@ -1086,6 +1140,7 @@ local function hopServer(force)
     if candidatesTried > 0 and fallbackReason == "no candidates" then
         fallbackReason = "all candidates exhausted"
     end
+
 
     print("[Hop] Fallback rejoin:", fallbackReason)
 
@@ -1103,6 +1158,8 @@ local function hopServer(force)
 
     hopInProgress = false
 end
+
+
 
 local function getItemSpawns(itemName)
     local result = {
@@ -1913,36 +1970,34 @@ local function walkForward(duration)
     print("[Init] Walk finished")
 end
 
-writeMyPresence()
-task.wait(0.7)
-
-do
-    local mySid = tostring(game.JobId)
-    local others = getAccountsOnServer(mySid, LP.UserId)
-
-    if #others > 0 then
-        local winner = others[1]
-
-        for _, u in ipairs(others) do
-            if u < winner then
-                winner = u
-            end
-        end
-
-        if LP.UserId == winner then
-            print("[Init] Staying, other accounts on this server will hop:", mySid)
-        else
-            print("[Init] Shared with account", winner, "→ hopping away")
-            hopServer(true)
-        end
-    else
-        print("[Init] Server free, claimed:", mySid)
-    end
-end
-
 task.wait(1.2)
 
 walkForward(7)
+
+
+do
+    local currentJobId = tostring(game.JobId)
+
+    if currentJobId and currentJobId ~= "" then
+        local data = loadHopData()
+        local c = data.claims[currentJobId]
+
+        local claimedByOther =
+            c
+            and type(c) == "table"
+            and c.u ~= LP.UserId
+            and (os.time() - (tonumber(c.t) or 0)) <= CLAIM_EXPIRY
+
+        if claimedByOther then
+            print("[Init] Current server claimed by another account → hopping away")
+            task.wait(0.8)
+            hopServer(true)
+        else
+            claimServer(currentJobId)
+            print("[Init] Claimed current server:", currentJobId)
+        end
+    end
+end
 
 task.spawn(farmLoop)
 task.spawn(sellLoop)
