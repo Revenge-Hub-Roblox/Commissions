@@ -10,7 +10,7 @@ pcall(function()
 end)
 
 local Fatality = loadstring(game:HttpGet(
-    "https://raw.githubusercontent.com/FrozentDev/Orders/refs/heads/main/Green%20fatality%20gui"
+    "https://raw.githubusercontent.com/FrozentDev/Orders/refs/heads/main/White%20fatality%20gui"
 ))()
 
 local Notification = Fatality:CreateNotifier()
@@ -75,7 +75,6 @@ local CFG = {
     AutoRejoin = false,
     AntiAFK = false,
 
-    ParryRatio = 12,
     ParryCooldown = 0.055,
     ParryDistance = 60,
     ParryCheckDistance = true,
@@ -85,18 +84,15 @@ local CFG = {
     SmartLeadMs = 200,
     SmartPingScale = 0.65,
     SmartEarlySlack = 0.05,
-    SmartLateMargin = 0.10,
     SmartHardMaxStuds = 180,
     SmartMinDot = 0.05,
     PingBasedOffset = 1.2,
     DistanceToParry = 1.05,
     EmergencyRadius = 22,
-    ClashDistance = 28,
     PredictionHorizon = 0.55,
     BallPrediction = 0.12,
     MaxRange = 90,
     DuelTimeout = 2.5,
-    SpamOnlyInClash = false,
 }
 
 local function notify(title, content, dur)
@@ -114,7 +110,6 @@ end
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Stats = game:GetService("Stats")
-local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
@@ -124,7 +119,6 @@ local Balls = workspace:WaitForChild("Balls", 9e9)
 local Camera = workspace.CurrentCamera
 
 local LastParry = 0
-local LastBallHit = nil
 local IsParrying = false
 local LastSpam = 0
 local SpamCount = 0
@@ -139,9 +133,9 @@ local rallyPhase = "idle"
 local lastRallyTarget = nil
 local rallySentAt = 0
 local lastRallyIncAt = 0
-local rallyBall = nil
-local RALLY_MIN_AWAY = 0.18
-local RALLY_MIN_GAP = 0.35
+local flightOriginPos = nil
+local RALLY_MIN_AWAY = 0.12
+local RALLY_MIN_GAP = 0.25
 
 local function resetRally()
     rallyCount = 0
@@ -170,48 +164,37 @@ local function getBallVelocity(ball)
     return ball.Velocity or Vector3.zero
 end
 
+local function getBallTargetStr(ball)
+    local t = ball:GetAttribute("target") or ball:GetAttribute("Target")
+        or ball:GetAttribute("currentTarget") or ball:GetAttribute("to")
+    return t and tostring(t) or nil
+end
+
 local function getRealBall()
     local char = Player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
-    local best, bestD = nil, math.huge
+    local realBall, targetedAtMe, best, bestD = nil, nil, nil, math.huge
     for _, v in ipairs(Balls:GetChildren()) do
-        if not v:IsA("BasePart") then continue end
-        local isReal = v:GetAttribute("realBall") == true
-        local tgt = v:GetAttribute("target") or v:GetAttribute("Target") or v:GetAttribute("currentTarget")
-        if isReal or tgt ~= nil then
-            if root then
-                local d = (v.Position - root.Position).Magnitude
-                if tgt == Player.Name or tgt == Player.DisplayName or (char and tgt == char.Name) then
+        if v:IsA("BasePart") then
+            if v:GetAttribute("realBall") == true then
+                realBall = v
+            end
+            local tgt = v:GetAttribute("target") or v:GetAttribute("Target") or v:GetAttribute("currentTarget")
+            if tgt then
+                if root then
+                    local d = (v.Position - root.Position).Magnitude
+                    if not targetedAtMe
+                        and (tgt == Player.Name or tgt == Player.DisplayName or (char and tgt == char.Name)) then
+                        targetedAtMe = v
+                    end
+                    if d < bestD then bestD, best = d, v end
+                else
                     return v
                 end
-                if d < bestD then bestD, best = d, v end
-            else
-                return v
             end
         end
     end
-    return best
-end
-
-local function getNearestEnemy(myPos)
-    local alive = workspace:FindFirstChild("Alive")
-    local closestD, closestName = math.huge, nil
-    local myChar = Player.Character
-    if alive then
-        for _, c in ipairs(alive:GetChildren()) do
-            if c:IsA("Model") and c ~= myChar then
-                local r = c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart
-                if r then
-                    local d = (r.Position - myPos).Magnitude
-                    if d < closestD then
-                        closestD = d
-                        closestName = c.Name
-                    end
-                end
-            end
-        end
-    end
-    return closestD, closestName
+    return realBall or targetedAtMe or best
 end
 
 local function batchMultiplier(mode)
@@ -220,43 +203,24 @@ local function batchMultiplier(mode)
     return 1
 end
 
-local function spamInterval(aps, mode)
-    local rate = math.max(1, (aps or 50) * batchMultiplier(mode))
-    return 1 / rate
-end
-
-local function VerifyBall(Ball)
-    return typeof(Ball) == "Instance"
-        and Ball:IsA("BasePart")
-        and Ball:IsDescendantOf(Balls)
-        and (Ball:GetAttribute("realBall") == true or Ball:GetAttribute("target") ~= nil)
-end
-
 local function IsTarget(ball)
     local c = Player.Character
     if not c then return false end
     if not CFG.TargetCheck then return true end
+    if ball then
+        local t = getBallTargetStr(ball)
+        if t ~= nil then
+            if t == Player.Name or t == Player.DisplayName or t == c.Name
+                or t == Player.UserId or t == tostring(Player.UserId) then
+                return true
+            end
+            return false
+        end
+    end
     if c:FindFirstChild("Highlight") ~= nil or c:GetAttribute("Targeted") == true then
         return true
     end
-    if ball then
-        local t = ball:GetAttribute("target") or ball:GetAttribute("Target")
-            or ball:GetAttribute("currentTarget") or ball:GetAttribute("to")
-        if t == Player.Name or t == Player.DisplayName or t == c.Name
-            or t == Player.UserId or t == tostring(Player.UserId) then
-            return true
-        end
-    end
     return false
-end
-
-local function getThreshold()
-    local base = CFG.ParryRatio or 10
-    local acc = CFG.Accuracy or 100
-    if CFG.RandomizeAccuracy then
-        acc = math.clamp(acc + math.random(-8, 8), 10, 100)
-    end
-    return base * (0.55 + (acc / 100) * 0.5)
 end
 
 local blockBtn
@@ -294,72 +258,85 @@ local function doClick()
     end)
 end
 
-local approachLocked = false
-local approachBall = nil
-local approachClickedAt = 0
-local approachLeftUs = false
-local notTargetedSince = 0
 local pendingParryToken = 0
 local smartPrevEta = math.huge
 local smartLastBall = nil
+local smartFresh = false
 
-local function lockApproach(ball)
-    approachLocked = true
-    approachBall = ball
-    approachClickedAt = os.clock()
-    approachLeftUs = false
-    notTargetedSince = 0
-    if ball then
-        LastBallHit = ball
-    end
-end
+local parryState = "idle"
+local gateBall = nil
+local gateClickedAt = 0
+local gateNotUsSince = 0
+local rearmUntil = 0
 
-local function unlockApproach()
-    approachLocked = false
-    approachBall = nil
-    approachLeftUs = false
-    notTargetedSince = 0
-    pendingParryToken += 1
-    smartPrevEta = math.huge
+local STABLE_LEAVE = 0.15
+local MISS_TIMEOUT = 0.9
+local REARM_AFTER_CLICK = 0.30
+local REARM_AFTER_MISS = 0.35
+
+local function myNameSet()
+    local s = { [Player.Name] = true, [Player.DisplayName] = true }
+    if Player.Character then s[Player.Character.Name] = true end
+    return s
 end
 
 local function updateApproachGate(ball)
-    if not approachLocked then return end
-
-    if not ball or (approachBall and ball ~= approachBall) then
-        unlockApproach()
-        return
-    end
-
-    local onUs = IsTarget(ball)
     local now = os.clock()
 
-    if not onUs then
-        if notTargetedSince == 0 then
-            notTargetedSince = now
-        end
-        if (now - approachClickedAt) < 0.55 then
-            approachLeftUs = true
-        end
-        if (now - notTargetedSince) >= 0.12 then
-            approachLeftUs = true
-        end
-    else
-        if approachLeftUs and (now - notTargetedSince) >= 0.10 and notTargetedSince > 0 then
-            unlockApproach()
-            return
-        end
-        if (now - approachClickedAt) > 0.85 and not approachLeftUs then
-            unlockApproach()
-            return
-        end
-        notTargetedSince = 0
+    if gateBall and gateBall ~= ball and not gateBall:IsDescendantOf(Balls) then
+        parryState = "idle"
+        gateNotUsSince = 0
+        smartPrevEta = math.huge
+        smartFresh = true
     end
+    gateBall = ball
+
+    local names = myNameSet()
+    local tgtStr = ball and getBallTargetStr(ball) or nil
+    local onUs
+    if tgtStr ~= nil then
+        onUs = names[tgtStr] == true
+    else
+        local c = Player.Character
+        onUs = c ~= nil and (c:FindFirstChild("Highlight") ~= nil or c:GetAttribute("Targeted") == true)
+    end
+
+    if parryState == "locked" then
+        if not onUs then
+            if gateNotUsSince == 0 then gateNotUsSince = now end
+            if (now - gateNotUsSince) >= STABLE_LEAVE then
+                parryState = "away"
+            end
+        else
+            gateNotUsSince = 0
+            if (now - gateClickedAt) > MISS_TIMEOUT then
+                parryState = "idle"
+                rearmUntil = now + REARM_AFTER_MISS
+                smartFresh = true
+            end
+        end
+    elseif parryState == "away" then
+        if onUs then
+            parryState = "idle"
+            gateNotUsSince = 0
+            smartPrevEta = math.huge
+            smartFresh = true
+        end
+    end
+end
+
+local function lockApproach(ball)
+    parryState = "locked"
+    gateBall = ball
+    gateClickedAt = os.clock()
+    gateNotUsSince = 0
+    rearmUntil = gateClickedAt + REARM_AFTER_CLICK
 end
 
 local function fireParryNow(reason, ball)
     local now = os.clock()
-    if approachLocked then return end
+    if parryState ~= "idle" then return end
+    if now < rearmUntil then return end
     if now - LastParry < (CFG.ParryCooldown or 0.055) then return end
     if IsParrying then return end
 
@@ -374,7 +351,7 @@ end
 
 local function Parry(reason, ball, dist)
     if not CFG.AutoParry then return end
-    if approachLocked then return end
+    if parryState ~= "idle" then return end
 
     if not CFG.SmartDistance and CFG.ParryCheckDistance ~= false then
         local maxDist = CFG.ParryDistance or 60
@@ -396,6 +373,7 @@ local function Parry(reason, ball, dist)
         if token ~= pendingParryToken then return end
         if not CFG.AutoParry then return end
         local now = os.clock()
+        rearmUntil = now + REARM_AFTER_CLICK
         if now - LastParry < (CFG.ParryCooldown or 0.055) then return end
         LastParry = now
         doClick()
@@ -403,12 +381,16 @@ local function Parry(reason, ball, dist)
 end
 
 local spamBurst = false
+local spamOwnsBall = false
 local rallyBlockSince = nil
+local spamTolerateUntil = 0
+local spamPartnerName = nil
+local spamBallInstance = nil
+local ETA_TOL = 0.03
 
 local function SpamClick(ball)
     LastParry = os.clock()
     IsParrying = true
-    spamBurst = true
     doClick()
     SpamCount += 1
     task.delay(0.04, function()
@@ -418,19 +400,10 @@ end
 
 local function updateDuel(ball, root)
     local now = tick()
-    local tgt = ball:GetAttribute("target") or ball:GetAttribute("Target")
-        or ball:GetAttribute("currentTarget") or ball:GetAttribute("to")
-    local tgtStr = tgt and tostring(tgt) or nil
-    local myNames = { [Player.Name] = true, [Player.DisplayName] = true }
-    if Player.Character then myNames[Player.Character.Name] = true end
+    local tgtStr = getBallTargetStr(ball)
+    local myNames = myNameSet()
 
     local onMe = tgtStr and myNames[tgtStr] or false
-    local nearestD, nearestName = getNearestEnemy(root.Position)
-
-    if ball ~= rallyBall then
-        rallyBall = ball
-        resetRally()
-    end
 
     if tgtStr and not onMe then
         duelPartner = tgtStr
@@ -442,6 +415,7 @@ local function updateDuel(ball, root)
     elseif now - duelLastSeen > (CFG.DuelTimeout or 2.5) then
         duelPartner = nil
         duelActive = false
+        flightOriginPos = nil
         resetRally()
     end
 
@@ -450,6 +424,10 @@ local function updateDuel(ball, root)
         lastRallyTarget = tgtStr
 
         if onMe then
+            local d0 = (ball.Position - root.Position).Magnitude
+            if not flightOriginPos or (flightOriginPos - root.Position).Magnitude < d0 then
+                flightOriginPos = ball.Position
+            end
             if prev and not myNames[prev] and rallyPhase == "sent_away" then
                 local awayLongEnough = (now - rallySentAt) >= RALLY_MIN_AWAY
                 local gapOk = (now - lastRallyIncAt) >= RALLY_MIN_GAP
@@ -460,8 +438,9 @@ local function updateDuel(ball, root)
             end
             rallyPhase = "on_me"
         elseif tgtStr then
+            flightOriginPos = nil
             if rallyPhase == "on_me" or (prev and myNames[prev]) then
-                local weHit = (os.clock() - LastParry) < 1.25
+                local weHit = (os.clock() - LastParry) < 2.0
                 if weHit then
                     rallyPhase = "sent_away"
                     rallySentAt = now
@@ -470,11 +449,16 @@ local function updateDuel(ball, root)
                 end
             end
         end
-    elseif onMe and rallyPhase == "idle" then
-        rallyPhase = "on_me"
+    elseif onMe then
+        if not flightOriginPos then
+            flightOriginPos = ball.Position
+        end
+        if rallyPhase == "idle" then
+            rallyPhase = "on_me"
+        end
     end
 
-    return duelActive, nearestD, nearestName, onMe, rallyCount
+    return duelActive, onMe, rallyCount
 end
 
 local function computeThreat(ball, root)
@@ -535,20 +519,16 @@ local function computeThreat(ball, root)
     }
 end
 
-local function ballETA(ball, root)
-    if not ball or not root then return math.huge, 0, 0 end
-    local dist = (root.Position - ball.Position).Magnitude
-    local vel = getBallVelocity(ball)
-    local speed = vel.Magnitude
-    if speed < 1 then return math.huge, dist, speed end
-    return dist / speed, dist, speed
-end
-
-local function passesETAGate(eta, enabled, maxEta)
-    if not enabled then return true end
-    maxEta = tonumber(maxEta) or 1
-    if eta ~= eta or eta == math.huge then return false end
-    return eta <= maxEta
+local function ballFullFlightETA(ball, root, curDist)
+    if not ball or not root then return math.huge end
+    local speed = getBallVelocity(ball).Magnitude
+    if speed < 1 then return math.huge end
+    local d = curDist or (root.Position - ball.Position).Magnitude
+    if flightOriginPos then
+        local fd = (flightOriginPos - root.Position).Magnitude
+        if fd > d then d = fd end
+    end
+    return d / speed
 end
 
 local function shouldSpamNow()
@@ -564,36 +544,79 @@ local function shouldSpamNow()
         return false
     end
 
-    local inDuel, nearestD, _, onMe, rally = updateDuel(ball, root)
+    if spamBurst and spamBallInstance and spamBallInstance ~= ball
+        and not spamBallInstance:IsDescendantOf(Balls) then
+        spamBurst = false
+    end
+    spamBallInstance = ball
 
+    local _, _, rally = updateDuel(ball, root)
+
+    local now = os.clock()
     local targeted = IsTarget(ball)
-    if not targeted then
+    local tgtStr = getBallTargetStr(ball)
+
+    local exchange = targeted
+    if not exchange and spamBurst then
+        if tgtStr ~= nil and spamPartnerName ~= nil and tgtStr == spamPartnerName then
+            exchange = true
+        elseif tgtStr == nil and now < spamTolerateUntil then
+            exchange = true
+        end
+    end
+
+    if exchange then
+        spamTolerateUntil = now + 0.15
+    else
         spamBurst = false
         return false
     end
 
     local dist = (root.Position - ball.Position).Magnitude
 
-    if CFG.SpamCheckDistance ~= false and dist > (CFG.SpamDistance or 25) then
-        spamBurst = false
-        return false
-    end
-
-    local rallyOk = (rally or 0) >= (CFG.SpamRallyNeeded or 3)
-    if not spamBurst and CFG.SpamRequireRally ~= false and not rallyOk then
-        local now = os.clock()
-        if not rallyBlockSince then rallyBlockSince = now end
-        if (now - rallyBlockSince) < (CFG.SpamRallyGrace or 4) then
+    if CFG.SpamCheckDistance ~= false then
+        local cap = (CFG.SpamDistance or 25) + (spamBurst and 3 or 0)
+        if dist > cap then
+            spamBurst = false
             return false
         end
-    else
-        rallyBlockSince = nil
     end
 
-    return true, dist, inDuel, nearestD, nil, rally, ball
-end
+    if not spamBurst then
+        if not targeted then return false end
 
-local spamOwnsBall = false
+        if CFG.SpamRequireRally ~= false then
+            local rallyOk = (rally or 0) >= (CFG.SpamRallyNeeded or 3)
+            if not rallyOk then
+                if not rallyBlockSince then rallyBlockSince = now end
+                if (now - rallyBlockSince) < (CFG.SpamRallyGrace or 4) then
+                    return false
+                end
+            else
+                rallyBlockSince = nil
+            end
+        else
+            rallyBlockSince = nil
+        end
+
+        if CFG.SpamETAGate then
+            local vel = getBallVelocity(ball)
+            local toMe = root.Position - ball.Position
+            local approaching = toMe.Magnitude > 0.01 and vel:Dot(toMe.Unit) > 1
+            local fullEta = approaching and ballFullFlightETA(ball, root, dist) or math.huge
+            if fullEta == math.huge or fullEta ~= fullEta
+                or fullEta > (CFG.SpamMaxETA or 0.2) + ETA_TOL then
+                return false
+            end
+        end
+
+        spamPartnerName = duelPartner
+        rallyBlockSince = nil
+        spamBurst = true
+    end
+
+    return true, dist, duelActive, nil, nil, rally, ball
+end
 
 RunService.RenderStepped:Connect(function()
     local wantSpam = CFG.AutoSpam or CFG.Spam
@@ -601,10 +624,11 @@ RunService.RenderStepped:Connect(function()
         spamOwnsBall = false
         spamBurst = false
         rallyBlockSince = nil
+        spamPartnerName = nil
         return
     end
 
-    local ok, dist, inDuel, _, eta, rally, ball = shouldSpamNow()
+    local ok, dist, _, _, _, _, ball = shouldSpamNow()
     if not ok then
         spamOwnsBall = false
         return
@@ -614,10 +638,17 @@ RunService.RenderStepped:Connect(function()
 
     local aps = CFG.AutoSpam and (CFG.SpamAPS or 65) or (CFG.SpamSpeed or 50)
     local mode = CFG.AutoSpam and (CFG.SpamBatch or "Extremely Fast") or (CFG.SpamBatch2 or "Fast")
-    local interval = spamInterval(aps, mode)
-    if dist and dist > 16 then
-        interval = math.max(interval, 0.05)
+
+    local apsEff = aps
+    if CFG.SpamCheckDistance ~= false then
+        local farD = CFG.SpamDistance or 25
+        local closeD = 12
+        local prox = math.clamp((farD - (dist or farD)) / math.max(farD - closeD, 1), 0, 1)
+        apsEff = aps * (0.45 + 0.55 * prox)
     end
+
+    local interval = 1 / math.max(1, apsEff * batchMultiplier(mode))
+    interval = math.max(interval, 0.035)
 
     local now = os.clock()
     if now - LastSpam < interval then return end
@@ -745,12 +776,12 @@ RunService.RenderStepped:Connect(function(dt)
     local state = targeted and "target" or "neutral"
 
     if CFG.AutoParry and targeted and threat and threat.speed > 3 then
-        if approachLocked or spamBurst then
+        if parryState ~= "idle" or spamBurst then
             state = "parry"
         elseif not spamOwnsBall then
             local ping = getPingSec()
             local minDot = CFG.SmartMinDot or 0.05
-            local approaching = (threat.dot >= minDot) or (threat.approachSpeed > 3) or dist <= 25
+            local approaching = (threat.dot >= minDot) or (threat.approachSpeed > 3)
 
             local eta
             if threat.approachSpeed > 2 then
@@ -768,13 +799,18 @@ RunService.RenderStepped:Connect(function(dt)
             if smartLastBall ~= ball then
                 smartPrevEta = math.huge
                 smartLastBall = ball
+                smartFresh = true
             end
 
             local shouldFire = false
             local reason = ""
             local spike = (threat.deltaV or 0) > 35
+            local receding = threat.approachSpeed < -8
 
-            if CFG.SmartDistance then
+            if smartFresh then
+                smartPrevEta = eta
+                smartFresh = false
+            elseif CFG.SmartDistance then
                 local baseLead = (CFG.SmartLeadMs or 200) / 1000
                 local lead = baseLead + ping * (CFG.SmartPingScale or 0.65) + (1 / 60)
                 if threat.speed > 90 then
@@ -794,7 +830,6 @@ RunService.RenderStepped:Connect(function(dt)
                 lead = math.clamp(lead, 0.08, 0.55)
 
                 local earlySlack = CFG.SmartEarlySlack or 0.05
-                local lateMargin = CFG.SmartLateMargin or 0.10
                 local hardMax = CFG.SmartHardMaxStuds or 180
                 local emergency = dist <= (CFG.EmergencyRadius or 22)
                     or eta <= math.max(0.09, ping * 0.7)
@@ -807,11 +842,6 @@ RunService.RenderStepped:Connect(function(dt)
                 if (approaching or emergency) and notAbsurd then
                     if emergency or crossed or (inBand and eta <= smartPrevEta + 0.02) then
                         shouldFire = true
-                        reason = string.format(
-                            "smart eta=%.3f lead=%.3f d=%.1f spd=%.0f%s",
-                            eta, lead, dist, threat.speed,
-                            emergency and " EM" or (crossed and " EDGE" or " BAND")
-                        )
                     end
                 end
                 smartPrevEta = eta
@@ -846,8 +876,11 @@ RunService.RenderStepped:Connect(function(dt)
 
                 if inRange and (approaching or emergency) and (emergency or timeOk or futureOk) then
                     shouldFire = true
-                    reason = string.format("classic ttt=%.2f thr=%.2f d=%.1f", threat.ttt, thr, dist)
                 end
+            end
+
+            if shouldFire and receding and not spike and threat.dot < 0.1 then
+                shouldFire = false
             end
 
             if shouldFire then
@@ -857,6 +890,7 @@ RunService.RenderStepped:Connect(function(dt)
         end
     elseif not targeted then
         smartPrevEta = math.huge
+        smartFresh = true
     end
 
     if CFG.VisualRing then
@@ -1002,7 +1036,7 @@ do
         Name = "Actions Per Second",
         Default = 65,
         Min = 1,
-        Max = 100,
+        Max = 200,
         Callback = function(v) CFG.SpamAPS = v end
     })
     AutoSpamSec:AddToggle({
@@ -1126,7 +1160,7 @@ do
     NotificationsSec:AddToggle({ Name = "Detection Notifications", Default = false, Callback = function(v) CFG.DetectionNotifications = v end })
 end
 
-local Misc = Window:AddMenu({ Name = "MISC", Icon = "settings" })
+local Misc = Window:AddMenu({ Name = "MISC", Icon = "layout-dashboard" })
 do
     local HUD = Misc:AddSection({ Position = "left", Name = "HUD" })
     local PlayerSec = Misc:AddSection({ Position = "center", Name = "PLAYER" })
