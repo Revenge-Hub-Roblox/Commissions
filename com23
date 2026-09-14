@@ -1304,28 +1304,90 @@ task.spawn(function()
     end
 end)
 
+local GachaRF
+task.spawn(function()
+    pcall(function()
+        GachaRF = replicated:WaitForChild("Modules", 15):WaitForChild("Net", 15):WaitForChild("RF/GachaNetworkRF", 15)
+    end)
+end)
+
 task.spawn(function()
     while task.wait(Sec) do
         if not CONFIG.AutoBuyRandomFruit then continue end
         pcall(function()
-            if CommF then
-                CommF:InvokeServer("Cousin", "Buy")
+            if GachaRF then
+                GachaRF:InvokeServer({
+                    Context = "Purchase",
+                    BoxName = "ZiolesGacha"
+                })
             end
         end)
     end
 end)
 
+local FRUIT_ORIGINAL = {
+    ["Rocket Fruit"]     = "Rocket-Rocket",
+    ["Spin Fruit"]       = "Spin-Spin",
+    ["Chop Fruit"]       = "Chop-Chop",
+    ["Spring Fruit"]     = "Spring-Spring",
+    ["Bomb Fruit"]       = "Bomb-Bomb",
+    ["Smoke Fruit"]      = "Smoke-Smoke",
+    ["Spike Fruit"]      = "Spike-Spike",
+    ["Flame Fruit"]      = "Flame-Flame",
+    ["Ice Fruit"]        = "Ice-Ice",
+    ["Sand Fruit"]       = "Sand-Sand",
+    ["Dark Fruit"]       = "Dark-Dark",
+    ["Eagle Fruit"]      = "Eagle-Eagle",
+    ["Diamond Fruit"]    = "Diamond-Diamond",
+    ["Light Fruit"]      = "Light-Light",
+    ["Rubber Fruit"]     = "Rubber-Rubber",
+    ["Ghost Fruit"]      = "Ghost-Ghost",
+    ["Magma Fruit"]      = "Magma-Magma",
+    ["Quake Fruit"]      = "Quake-Quake",
+    ["Buddha Fruit"]     = "Buddha-Buddha",
+    ["Love Fruit"]       = "Love-Love",
+    ["Spider Fruit"]     = "Spider-Spider",
+    ["Sound Fruit"]      = "Sound-Sound",
+    ["Phoenix Fruit"]    = "Bird-Bird",
+    ["Portal Fruit"]     = "Portal-Portal",
+    ["Rumble Fruit"]     = "Rumble-Rumble",
+    ["Pain Fruit"]       = "Pain-Pain",
+    ["Blizzard Fruit"]   = "Blizzard-Blizzard",
+    ["Gravity Fruit"]    = "Gravity-Gravity",
+    ["Mammoth Fruit"]    = "Mammoth-Mammoth",
+    ["T-Rex Fruit"]      = "T-Rex-T-Rex",
+    ["Yeti Fruit"]       = "Yeti-Yeti",
+    ["Kitsune Fruit"]    = "Kitsune-Kitsune",
+    ["Leopard Fruit"]    = "Leopard-Leopard",
+    ["Dragon Fruit"]     = "Dragon-Dragon",
+    ["Dough Fruit"]      = "Dough-Dough",
+    ["Shadow Fruit"]     = "Shadow-Shadow",
+    ["Venom Fruit"]      = "Venom-Venom",
+    ["Control Fruit"]    = "Control-Control",
+    ["Gas Fruit"]        = "Gas-Gas",
+    ["Spirit Fruit"]     = "Spirit-Spirit",
+    ["Falcon Fruit"]     = "Falcon-Falcon",
+}
+
+local function GetOriginalFruitName(toolName)
+    local orig = FRUIT_ORIGINAL[toolName]
+    if orig then return orig end
+    local base = toolName:gsub(" Fruit$", "")
+    return base .. "-" .. base
+end
+
 local function UpdStFruit()
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     if not backpack then return end
     for _, x in next, backpack:GetChildren() do
-        local StoreFruit = x:FindFirstChild("EatRemote", true)
-        if StoreFruit then
-            CommF:InvokeServer(
-                "StoreFruit",
-                StoreFruit.Parent:GetAttribute("OriginalName"),
-                backpack:FindFirstChild(x.Name)
-            )
+        if x:IsA("Tool") and x:FindFirstChild("EatRemote", true) then
+            local origName = x:GetAttribute("OriginalName") or GetOriginalFruitName(x.Name)
+            local tool = backpack:FindFirstChild(x.Name)
+            if tool then
+                pcall(function()
+                    CommF:InvokeServer("StoreFruit", origName, tool)
+                end)
+            end
         end
     end
 end
@@ -1556,25 +1618,44 @@ task.spawn(function()
     end)
 end)
 
+local function BuyHaki(hakiName)
+    if CommF then
+        pcall(function() CommF:InvokeServer("BuyHaki", hakiName) end)
+    end
+end
+
 task.spawn(function()
-    while task.wait(Sec) do
-        pcall(function()
-            if _G.Level and LocalPlayer.Character and not LocalPlayer.Character:FindFirstChild("HasBuso") then
-                if CommF then
-                    CommF:InvokeServer("Buso")
-                end
-            end
-        end)
+    local deadline = tick() + 90
+    while tick() < deadline and not CommF do task.wait(0.5) end
+    if CommF then
+        task.wait(5)
+        pcall(function() BuyHaki("Buso") end)
+        print("[OK Hub] BuyHaki Buso sent")
+        task.wait(1)
+        pcall(function() BuyHaki("Soru") end)
+        print("[OK Hub] BuyHaki Soru sent")
+        task.wait(1)
+        pcall(function() BuyHaki("Geppo") end)
+        print("[OK Hub] BuyHaki Geppo sent")
     end
 end)
 
 task.spawn(function()
-    local deadline = tick() + 60
-    while tick() < deadline and not CommF do task.wait(0.5) end
-    if CommF then
-        task.wait(5)
-        pcall(function() CommF:InvokeServer("BuyHaki", "Buso") end)
-        print("[OK Hub] BuyHaki(Buso) sent")
+    while task.wait(5) do
+        pcall(function()
+            if not _G.Level then return end
+            local ch = LocalPlayer.Character
+            if not ch then return end
+            if not ch:FindFirstChild("HasBuso") then
+                BuyHaki("Buso")
+            end
+            if not ch:FindFirstChild("Soru") and not LocalPlayer.Backpack:FindFirstChild("Soru") then
+                BuyHaki("Soru")
+            end
+            if not ch:FindFirstChild("Geppo") and not LocalPlayer.Backpack:FindFirstChild("Geppo") then
+                BuyHaki("Geppo")
+            end
+        end)
     end
 end)
 
