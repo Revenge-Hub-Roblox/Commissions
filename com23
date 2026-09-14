@@ -9,11 +9,13 @@ end
 
 local CONFIG = {
     AutoFarm           = CfgBool("AutoFarm", true),
-    AutoBuyRandomFruit = CfgBool("AutoBuyRandomFruit", true),
-    AutoStoreFruit     = CfgBool("AutoStoreFruit", true),
     Webhook            = CfgBool("Webhook", true),
     WebhookURL         = (type(cfg.WebhookURL) == "string" and cfg.WebhookURL) or "",
     QueueOnTeleport    = CfgBool("QueueOnTeleport", true),
+    AutoBuyRandomFruit = CfgBool("AutoBuyRandomFruit", true),
+    AutoStoreFruit     = CfgBool("AutoStoreFruit", true),
+    AllowedSea3Fruits  = (type(cfg.AllowedSea3Fruits) == "table" and cfg.AllowedSea3Fruits)
+        or { "Flame-Flame", "Ice-Ice", "Sand-Sand", "Dark-Dark", "Light-Light", "Rubber-Rubber", "Ghost-Ghost", "Magma-Magma" },
 }
 
 local Players           = game:GetService("Players")
@@ -53,7 +55,7 @@ pcall(function()
             end
             return old_coroutine_wrap(func, ...)
         end))
-        print("[OK Hub] Anticheat bypass: on")
+        print("[Frozent0] Anticheat bypass: on")
     end
 end)
 
@@ -70,7 +72,7 @@ pcall(function()
             end
             return OldNameCall(Self, ...)
         end)
-        print("[OK Hub] Nofall: on")
+        print("[Frozent0] Nofall: on")
     end
 end)
 
@@ -81,7 +83,7 @@ getgenv().OKHUB_CONFIG = ]] .. HttpService:JSONEncode(cfg) .. [[
 loadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com23'))()
 ]]
     queue_on_teleport(self_src)
-    print("[OK Hub] QueueOnTeleport: on")
+    print("[Frozent0] QueueOnTeleport: on")
 end
 
 local MOVE_SPEED = 200
@@ -112,7 +114,10 @@ local UW_ARRIVE_RADIUS = 60
 
 local SEA2_MIN_LEVEL   = 701
 local SEA2_DOOR_CF     = CFrame.new(1288.73328, 35.8959961, -1361.06274, -0.70963943, 0, -0.704565167, 0, 1, 0, 0.704565167, 0, -0.70963943)
-local SEA2_TRAVEL_MIN  = 1500
+local SEA3_MIN_LEVEL   = 1501
+
+local SEA3_FRUIT_HOP_DELAY = 20
+local SEA3_FRUIT_PICK_RADIUS = 12
 
 local UWRouteBusy = false
 
@@ -146,7 +151,7 @@ local lastStatus = ""
 local function UpdateStatus(t)
     if t == lastStatus then return end
     lastStatus = t
-    print("[OK Hub] " .. t)
+    print("[Frozent0] " .. t)
 end
 
 local function CleanupMobTables(m)
@@ -227,6 +232,21 @@ task.spawn(function()
             elseif hrp then
                 local clip = hrp:FindFirstChild("BodyClip")
                 if clip then clip:Destroy() end
+            end
+        end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.2) do
+        pcall(function()
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Sit == true then
+                hum.Sit = false
+                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    root.Velocity = Vector3.new(root.Velocity.X, 20, root.Velocity.Z)
+                end
             end
         end)
     end
@@ -337,7 +357,7 @@ end)
 
 task.spawn(function()
     if not sethiddenproperty then
-        warn("[OK Hub] sethiddenproperty unavailable, bring will be partial")
+        warn("[Frozent0] sethiddenproperty unavailable, bring will be partial")
         return
     end
     RunService.Stepped:Connect(function()
@@ -469,7 +489,12 @@ task.spawn(function()
             local closest, closestDist = nil, 80
             local fbClosest, fbDist = nil, 80
             for _, v in ipairs(enemies:GetChildren()) do
-                if Attack.Alive(v) and v:FindFirstChild("HumanoidRootPart") then
+                if not Attack.Alive(v) then continue end
+                if v:FindFirstChild("HumanoidRootPart") and v.Name == "Prisoner" then
+                    local badAcc = v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)")
+                    if badAcc then continue end
+                end
+                if v:FindFirstChild("HumanoidRootPart") then
                     local dist = (v.HumanoidRootPart.Position - root.Position).Magnitude
                     if dist < closestDist and not BringStuck[v] then
                         closestDist = dist
@@ -489,6 +514,9 @@ task.spawn(function()
             local pool = {}
             for _, v in ipairs(enemies:GetChildren()) do
                 if Attack.Alive(v) and v:FindFirstChild("HumanoidRootPart") then
+                    if v.Name == "Prisoner" and v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)") then
+                        continue
+                    end
                     local dStack  = (v.HumanoidRootPart.Position - anchorPos).Magnitude
                     local dPlayer = (v.HumanoidRootPart.Position - root.Position).Magnitude
                     if dStack <= 100 and dPlayer <= PLAYER_RANGE then
@@ -605,6 +633,14 @@ local function SameMob(enemyName, target)
     local sa = Norm(a:gsub("boss", " "))
     local sb = Norm(b:gsub("boss", " "))
     return sa ~= "" and sa == sb
+end
+
+local function IsValidQuestMob(v, mob)
+    if not SameMob(v.Name, mob) then return false end
+    if v.Name == "Prisoner" and v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)") then
+        return false
+    end
+    return true
 end
 
 local function GetPlayerLevel()
@@ -762,10 +798,10 @@ local function SetupEntranceVisual()
 
         if base.Position.X > UW_X then return end
 
-        print("[OK Hub] Entrance found: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
+        print("[Frozent0] Entrance found: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
 
         EntHighlight = Instance.new("Highlight")
-        EntHighlight.Name = "OKHub_EntranceHL"
+        EntHighlight.Name = "Frozent0_EntranceHL"
         EntHighlight.FillColor = Color3.fromRGB(255, 100, 0)
         EntHighlight.OutlineColor = Color3.fromRGB(255, 255, 0)
         EntHighlight.FillTransparency = 0.6
@@ -775,7 +811,7 @@ local function SetupEntranceVisual()
         EntHighlight.Parent = base
 
         local bb = Instance.new("BillboardGui")
-        bb.Name = "OKHub_EntranceBB"
+        bb.Name = "Frozent0_EntranceBB"
         bb.Size = UDim2.new(0, 220, 0, 60)
         bb.StudsOffset = Vector3.new(0, 6, 0)
         bb.AlwaysOnTop = true
@@ -1061,7 +1097,7 @@ local function FindMob(mob)
     local best, bd
     for _, v in ipairs(enemies:GetChildren()) do
         local hum, hrp = v:FindFirstChildOfClass("Humanoid"), v:FindFirstChild("HumanoidRootPart")
-        if hum and hrp and hum.Health > 0 and SameMob(v.Name, mob) then
+        if hum and hrp and hum.Health > 0 and IsValidQuestMob(v, mob) then
             local d = myRoot and (hrp.Position - myRoot.Position).Magnitude or math.huge
             if not bd or d < bd then best, bd = v, d end
         end
@@ -1076,7 +1112,7 @@ local function FindUnconfirmedMob(mob)
     local best, bd
     for _, v in ipairs(enemies:GetChildren()) do
         local hum, hrp = v:FindFirstChildOfClass("Humanoid"), v:FindFirstChild("HumanoidRootPart")
-        if hum and hrp and hum.Health > 0 and SameMob(v.Name, mob) and not DamageConfirmed[v] then
+        if hum and hrp and hum.Health > 0 and IsValidQuestMob(v, mob) and not DamageConfirmed[v] then
             local d = myRoot and (hrp.Position - myRoot.Position).Magnitude or math.huge
             if not bd or d < bd then best, bd = v, d end
         end
@@ -1418,41 +1454,6 @@ local function GetMoney()
     return v or "?"
 end
 
-local function GetFruitsList()
-    local fruits = {}
-    pcall(function()
-        if CommF then
-            local inv = CommF:InvokeServer("getInventoryFruits")
-            if type(inv) == "table" then
-                for _, v in pairs(inv) do
-                    if type(v) == "table" and v.Name then
-                        table.insert(fruits, v.Name)
-                    end
-                end
-            end
-        end
-    end)
-    pcall(function()
-        local bp = LocalPlayer:FindFirstChild("Backpack")
-        if bp then
-            for _, t in pairs(bp:GetChildren()) do
-                if t:IsA("Tool") and t:FindFirstChild("EatRemote", true) then
-                    table.insert(fruits, t.Name .. " (backpack)")
-                end
-            end
-        end
-        local ch = LocalPlayer.Character
-        if ch then
-            for _, t in pairs(ch:GetChildren()) do
-                if t:IsA("Tool") and t:FindFirstChild("EatRemote", true) then
-                    table.insert(fruits, t.Name .. " (equipped)")
-                end
-            end
-        end
-    end)
-    return fruits
-end
-
 local WEBHOOK_INTERVAL = 300
 local lastWebhook = 0
 local lastWebhookLvl = nil
@@ -1461,28 +1462,25 @@ local function SendWebhook(reason)
     if not CONFIG.Webhook or CONFIG.WebhookURL == "" then return end
     local req = request or (syn and syn.request) or http_request
     if not req then
-        warn("[OK Hub] request unavailable, webhook skipped")
+        warn("[Frozent0] request unavailable, webhook skipped")
         return
     end
 
     local lvl = GetPlayerLevel() or "?"
     local money = GetMoney()
-    local fruits = GetFruitsList()
-    local fruitStr = (#fruits > 0) and table.concat(fruits, ", ") or "none"
 
     local payload = HttpService:JSONEncode({
-        username = "OK Hub",
+        username = "Frozent0",
         embeds = {{
             title = "Account status" .. (reason and (" - " .. reason) or ""),
             color = 65280,
             fields = {
-                { name = "Player",  value = tostring(LocalPlayer.Name), inline = true },
-                { name = "Level",   value = tostring(lvl),              inline = true },
-                { name = "Money",   value = tostring(money),            inline = true },
-                { name = "Fruits",  value = fruitStr,                   inline = false },
-                { name = "Server",  value = "job: " .. tostring(game.JobId), inline = false },
+                { name = "Player", value = tostring(LocalPlayer.Name), inline = true },
+                { name = "Level",  value = tostring(lvl),              inline = true },
+                { name = "Money",  value = tostring(money),            inline = true },
+                { name = "Server", value = "job: " .. tostring(game.JobId), inline = false },
             },
-            footer = { text = "OK Hub • " .. os.date("%H:%M:%S") },
+            footer = { text = "Frozent0 • " .. os.date("%H:%M:%S") },
         }},
     })
 
@@ -1518,12 +1516,14 @@ task.spawn(function()
     while tick() < deadline and not CommF do task.wait(0.5) end
     if CommF then
         pcall(function() CommF:InvokeServer("SetTeam", "Pirates") end)
-        print("[OK Hub] Team set: Pirates")
+        print("[Frozent0] Team set: Pirates")
     end
 end)
 
 task.spawn(function()
     task.wait(15)
+    if not replicated.Remotes:FindFirstChild("Redeem") then return end
+
     local codes = {
         "LIGHTNINGABUSE","1LOSTADMIN","ADMINFIGHT","GIFTING_HOURS","NOMOREHACK",
         "BANEXPLOIT","WildDares","BossBuild","GetPranked","EARN_FRUITS",
@@ -1537,23 +1537,13 @@ task.spawn(function()
         "NOOB2ADMIN","CODESLIDE","fruitconcepts","krazydares"
     }
 
-    local RemotesFolder = replicated:FindFirstChild("Remotes")
-    local RedeemRemote = RemotesFolder and RemotesFolder:FindFirstChild("Redeem")
-    if not RedeemRemote then return end
-
-    local redeemed = 0
     for _, code in ipairs(codes) do
         task.wait(0.1)
         pcall(function()
-            if RedeemRemote.InvokeServer then
-                RedeemRemote:InvokeServer(code)
-            else
-                RedeemRemote:FireServer(code)
-            end
-            redeemed += 1
+            replicated.Remotes.Redeem:InvokeServer(code)
         end)
     end
-    print("[OK Hub] Codes redeemed: " .. redeemed .. "/" .. #codes)
+    print("[Frozent0] Codes attempted")
 end)
 
 local function Hop()
@@ -1618,44 +1608,43 @@ task.spawn(function()
     end)
 end)
 
-local function BuyHaki(hakiName)
-    if CommF then
-        pcall(function() CommF:InvokeServer("BuyHaki", hakiName) end)
-    end
+local function HakiOwned(hakiName)
+    local ok, owned = pcall(function()
+        local ch = LocalPlayer.Character
+        local bp = LocalPlayer.Backpack
+        if hakiName == "Buso" then
+            if ch and ch:FindFirstChild("HasBuso") then return true end
+            return false
+        end
+        if ch and (ch:FindFirstChild(hakiName) or ch:FindFirstChild("Has" .. hakiName)) then return true end
+        if bp and bp:FindFirstChild(hakiName) then return true end
+        return false
+    end)
+    return ok and owned or false
 end
+
+local HakiBuyFlags = { Buso = false, Soru = false, Geppo = false }
 
 task.spawn(function()
     local deadline = tick() + 90
     while tick() < deadline and not CommF do task.wait(0.5) end
-    if CommF then
-        task.wait(5)
-        pcall(function() BuyHaki("Buso") end)
-        print("[OK Hub] BuyHaki Buso sent")
-        task.wait(1)
-        pcall(function() BuyHaki("Soru") end)
-        print("[OK Hub] BuyHaki Soru sent")
-        task.wait(1)
-        pcall(function() BuyHaki("Geppo") end)
-        print("[OK Hub] BuyHaki Geppo sent")
-    end
-end)
+    if not CommF then return end
+    task.wait(5)
 
-task.spawn(function()
-    while task.wait(5) do
-        pcall(function()
-            if not _G.Level then return end
-            local ch = LocalPlayer.Character
-            if not ch then return end
-            if not ch:FindFirstChild("HasBuso") then
-                BuyHaki("Buso")
-            end
-            if not ch:FindFirstChild("Soru") and not LocalPlayer.Backpack:FindFirstChild("Soru") then
-                BuyHaki("Soru")
-            end
-            if not ch:FindFirstChild("Geppo") and not LocalPlayer.Backpack:FindFirstChild("Geppo") then
-                BuyHaki("Geppo")
-            end
-        end)
+    if not HakiBuyFlags.Buso and not HakiOwned("Buso") then
+        pcall(function() CommF:InvokeServer("BuyHaki", "Buso") end)
+        HakiBuyFlags.Buso = true
+        print("[Frozent0] BuyHaki Buso sent")
+    end
+    if not HakiBuyFlags.Soru and not HakiOwned("Soru") then
+        pcall(function() CommF:InvokeServer("BuyHaki", "Soru") end)
+        HakiBuyFlags.Soru = true
+        print("[Frozent0] BuyHaki Soru sent")
+    end
+    if not HakiBuyFlags.Geppo and not HakiOwned("Geppo") then
+        pcall(function() CommF:InvokeServer("BuyHaki", "Geppo") end)
+        HakiBuyFlags.Geppo = true
+        print("[Frozent0] BuyHaki Geppo sent")
     end
 end)
 
@@ -1775,13 +1764,138 @@ local function TryTrevor()
     pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "3") end)
 end
 
+local function GetStoredFruits()
+    local stored = {}
+    pcall(function()
+        local inv = CommF:InvokeServer("getInventoryFruits")
+        if type(inv) == "table" then
+            for _, v in pairs(inv) do
+                if type(v) == "table" and v.Name then
+                    table.insert(stored, v.Name)
+                end
+            end
+        end
+    end)
+    return stored
+end
+
+local function GetOpenableFruits()
+    local openable = {}
+    pcall(function()
+        local fruits = CommF:InvokeServer("GetFruits")
+        if type(fruits) == "table" then
+            for _, v in pairs(fruits) do
+                if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
+                    table.insert(openable, v.Name)
+                end
+            end
+        end
+    end)
+    return openable
+end
+
+local function TryLoadStoredFruit()
+    local stored = GetStoredFruits()
+    local openable = GetOpenableFruits()
+    for _, fruitName in pairs(openable) do
+        for _, storedName in pairs(stored) do
+            if fruitName == storedName and table.find(CONFIG.AllowedSea3Fruits, storedName) then
+                if not LocalPlayer.Backpack:FindFirstChild(storedName) then
+                    pcall(function() CommF:InvokeServer("F_", "LoadFruit", storedName) end)
+                    UpdateStatus("Sea 3: loaded " .. storedName .. " from storage")
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function FindGroundFruit()
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("Model") or obj:IsA("Tool") then
+            local name = obj.Name
+            local matched = nil
+            for _, allowed in ipairs(CONFIG.AllowedSea3Fruits) do
+                local display = allowed:split("-")[1]
+                if name == (display .. " Fruit") or name:find(display, 1, true) then
+                    matched = allowed
+                    break
+                end
+            end
+            if matched then
+                local handle = obj:IsA("Tool") and obj:FindFirstChild("Handle")
+                    or obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                if handle then
+                    return obj, handle
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
+local Sea3FruitHop = false
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if not Sea3FruitHop then continue end
+        if not _G.Level then continue end
+
+        local found, handle = FindGroundFruit()
+        if found and handle then
+            UpdateStatus("Sea 3: fruit found on ground, flying to it")
+            local targetCF = handle.CFrame
+            _tp(targetCF)
+
+            local deadline = tick() + 30
+            while tick() < deadline do
+                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if not root then break end
+                if handle.Parent and (root.Position - handle.Position).Magnitude <= SEA3_FRUIT_PICK_RADIUS then
+                    task.wait(0.5)
+                    if not found.Parent then
+                        UpdateStatus("Sea 3: fruit collected, stopping hop")
+                        Sea3FruitHop = false
+                        break
+                    end
+                    pcall(function()
+                        local hrp = root
+                        hrp.CFrame = handle.CFrame
+                    end)
+                end
+                if not found.Parent then
+                    UpdateStatus("Sea 3: fruit collected, stopping hop")
+                    Sea3FruitHop = false
+                    break
+                end
+                if activeTarget and (activeTarget.Position - handle.Position).Magnitude > 20 then
+                    _tp(handle.CFrame, true)
+                end
+                task.wait(0.2)
+            end
+        else
+            local deadline = tick() + SEA3_FRUIT_HOP_DELAY
+            while tick() < deadline and Sea3FruitHop do
+                local found2, handle2 = FindGroundFruit()
+                if found2 then break end
+                task.wait(0.5)
+            end
+            if Sea3FruitHop then
+                UpdateStatus("Sea 3: no allowed fruit on ground, hopping")
+                Hop()
+            end
+        end
+    end
+end)
+
 task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
             ZouActive = false
             if not _G.Level then return end
             local lvl = GetPlayerLevel() or 0
-            if not (World2 and lvl >= SEA2_TRAVEL_MIN) then return end
+            if not (World2 and lvl >= SEA3_MIN_LEVEL) then return end
             if not CommF then return end
             ZouActive = true
 
@@ -1795,6 +1909,7 @@ task.spawn(function()
                 pcall(function() unlockables = CommF:InvokeServer("GetUnlockables") end)
 
                 if unlockables and unlockables.FlamingoAccess ~= nil then
+                    Sea3FruitHop = false
                     pcall(function() CommF:InvokeServer("F_", "TravelZou") end)
 
                     local zcheck = -1
@@ -1821,43 +1936,44 @@ task.spawn(function()
                     end
 
                 else
-                    local stored, openable = {}, {}
-                    pcall(function()
-                        local inv = CommF:InvokeServer("getInventoryFruits")
-                        if type(inv) == "table" then
-                            for _, v in pairs(inv) do
-                                if type(v) == "table" and v.Name then
-                                    table.insert(stored, v.Name)
-                                end
-                            end
-                        end
-                    end)
-                    pcall(function()
-                        local fruits = CommF:InvokeServer("GetFruits")
-                        if type(fruits) == "table" then
-                            for _, v in pairs(fruits) do
-                                if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
-                                    table.insert(openable, v.Name)
-                                end
-                            end
-                        end
-                    end)
+                    local stored = GetStoredFruits()
+                    local openable = GetOpenableFruits()
+                    local usable = false
 
-                    local acted = false
                     for _, fruitName in pairs(openable) do
                         for _, storedName in pairs(stored) do
-                            if fruitName == storedName then
+                            if fruitName == storedName and table.find(CONFIG.AllowedSea3Fruits, storedName) then
+                                usable = true
                                 if not LocalPlayer.Backpack:FindFirstChild(storedName) then
                                     pcall(function() CommF:InvokeServer("F_", "LoadFruit", storedName) end)
+                                    UpdateStatus("Sea 3: loaded " .. storedName .. " from storage")
                                 else
                                     TryTrevor()
                                 end
-                                acted = true
                             end
                         end
                     end
-                    if not acted then
+
+                    if usable then return end
+
+                    local hasBackpackFruit = false
+                    for _, allowed in ipairs(CONFIG.AllowedSea3Fruits) do
+                        if LocalPlayer.Backpack:FindFirstChild(allowed) then
+                            hasBackpackFruit = true
+                            break
+                        end
+                    end
+
+                    if hasBackpackFruit then
                         TryTrevor()
+                        return
+                    end
+
+                    if not Sea3FruitHop then
+                        UpdateStatus("Sea 3: no allowed fruit in storage or backpack, starting server hop for ground fruits")
+                        Sea3FruitHop = true
+                        UpdStFruit()
+                        Hop()
                     end
                 end
 
@@ -1919,6 +2035,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     table.clear(HitOrder)
 end)
 
-print("[OK Hub] Config Edition loaded | AutoFarm: " .. tostring(CONFIG.AutoFarm)
-    .. " | Fruits: " .. tostring(CONFIG.AutoBuyRandomFruit) .. "/" .. tostring(CONFIG.AutoStoreFruit)
-    .. " | Webhook: " .. tostring(CONFIG.Webhook))
+print("[Frozent0] Config Edition loaded | AutoFarm: " .. tostring(CONFIG.AutoFarm)
+    .. " | Webhook: " .. tostring(CONFIG.Webhook)
+    .. " | Sea3Fruits: " .. tostring(#CONFIG.AllowedSea3Fruits))
