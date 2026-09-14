@@ -1347,24 +1347,25 @@ task.spawn(function()
     end)
 end)
 
+local GACHA_INTERVAL = 30
 task.spawn(function()
-    while task.wait(Sec) do
-        if not CONFIG.AutoBuyRandomFruit then continue end
-        pcall(function()
-            if GachaRF then
+    while true do
+        if CONFIG.AutoBuyRandomFruit and GachaRF then
+            pcall(function()
                 GachaRF:InvokeServer({
                     Context = "Purchase",
                     BoxName = "ZiolesGacha"
                 })
-            end
-        end)
+            end)
+        end
+        task.wait(GACHA_INTERVAL)
     end
 end)
 
 local FRUIT_ORIGINAL = {
     ["Rocket Fruit"]     = "Rocket-Rocket",
     ["Spin Fruit"]       = "Spin-Spin",
-    ["Chop Fruit"]       = "Chop-Chop",
+    ["Blade Fruit"]      = "Blade-Blade",
     ["Spring Fruit"]     = "Spring-Spring",
     ["Bomb Fruit"]       = "Bomb-Bomb",
     ["Smoke Fruit"]      = "Smoke-Smoke",
@@ -1382,27 +1383,28 @@ local FRUIT_ORIGINAL = {
     ["Quake Fruit"]      = "Quake-Quake",
     ["Buddha Fruit"]     = "Buddha-Buddha",
     ["Love Fruit"]       = "Love-Love",
+    ["Creation Fruit"]   = "Creation-Creation",
     ["Spider Fruit"]     = "Spider-Spider",
     ["Sound Fruit"]      = "Sound-Sound",
-    ["Phoenix Fruit"]    = "Bird-Bird",
+    ["Phoenix Fruit"]    = "Phoenix-Phoenix",
     ["Portal Fruit"]     = "Portal-Portal",
-    ["Rumble Fruit"]     = "Rumble-Rumble",
+    ["Lightning Fruit"]  = "Lightning-Lightning",
     ["Pain Fruit"]       = "Pain-Pain",
     ["Blizzard Fruit"]   = "Blizzard-Blizzard",
     ["Gravity Fruit"]    = "Gravity-Gravity",
     ["Mammoth Fruit"]    = "Mammoth-Mammoth",
     ["T-Rex Fruit"]      = "T-Rex-T-Rex",
-    ["Yeti Fruit"]       = "Yeti-Yeti",
-    ["Kitsune Fruit"]    = "Kitsune-Kitsune",
-    ["Leopard Fruit"]    = "Leopard-Leopard",
-    ["Dragon Fruit"]     = "Dragon-Dragon",
     ["Dough Fruit"]      = "Dough-Dough",
     ["Shadow Fruit"]     = "Shadow-Shadow",
     ["Venom Fruit"]      = "Venom-Venom",
-    ["Control Fruit"]    = "Control-Control",
     ["Gas Fruit"]        = "Gas-Gas",
     ["Spirit Fruit"]     = "Spirit-Spirit",
-    ["Falcon Fruit"]     = "Falcon-Falcon",
+    ["Tiger Fruit"]      = "Tiger-Tiger",
+    ["Yeti Fruit"]       = "Yeti-Yeti",
+    ["Magnet Fruit"]     = "Magnet-Magnet",
+    ["Kitsune Fruit"]    = "Kitsune-Kitsune",
+    ["Control Fruit"]    = "Control-Control",
+    ["Dragon Fruit"]     = "Dragon-Dragon",
 }
 
 local function GetOriginalFruitName(toolName)
@@ -1428,10 +1430,13 @@ local function UpdStFruit()
     end
 end
 
+local STORE_INTERVAL = 5
 task.spawn(function()
-    while task.wait(Sec) do
-        if not CONFIG.AutoStoreFruit then continue end
-        pcall(UpdStFruit)
+    while true do
+        if CONFIG.AutoStoreFruit then
+            pcall(UpdStFruit)
+        end
+        task.wait(STORE_INTERVAL)
     end
 end)
 
