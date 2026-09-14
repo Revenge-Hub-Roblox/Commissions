@@ -122,6 +122,10 @@ local SEA3_MIN_LEVEL   = 1501
 local SEA3_FRUIT_HOP_DELAY   = 20
 local SEA3_FRUIT_PICK_RADIUS = 12
 
+local NO_BRING_MOBS = {
+    ["Factory Staff"] = true,
+}
+
 local UWRouteBusy = false
 
 local QUEST_GIVERS = {}
@@ -416,6 +420,7 @@ end
 
 local function BringEnemy(Mon)
     if not _B or not Mon or not Mon:FindFirstChild("HumanoidRootPart") then return end
+    if NO_BRING_MOBS[Mon.Name] then return end
     pcall(function()
         if sethiddenproperty then
             sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", 9e9)
@@ -428,7 +433,8 @@ local function BringEnemy(Mon)
 
         for _, v in pairs(enemies:GetChildren()) do
             if v ~= Mon and v.Name == Mon.Name
-                and not NoBring[v] and DamageConfirmed[v] and not PhantomBlocked[v] then
+                and not NoBring[v] and DamageConfirmed[v] and not PhantomBlocked[v]
+                and not NO_BRING_MOBS[v.Name] then
                 local hum  = v:FindFirstChildOfClass("Humanoid")
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0 then
@@ -566,6 +572,10 @@ task.spawn(function()
                 return a.dist < b.dist
             end)
 
+            if NO_BRING_MOBS[closest.Name] then
+                pool = { pool[1] }
+            end
+
             EquipWeapon(_G.SelectWeapon)
 
             VirtualUser:CaptureController()
@@ -639,6 +649,7 @@ task.spawn(function()
                     DamageHPLast[m] = nil
                     DamageHP[m] = nil
                 else
+                    if NO_BRING_MOBS[m.Name] then continue end
                     local hrp = m:FindFirstChild("HumanoidRootPart")
                     local dist = hrp and (hrp.Position - root.Position).Magnitude or 9e9
                     local beingHit = HitOrder[m] and (now - HitOrder[m]) < 1.5
@@ -1209,10 +1220,14 @@ local function FarmQuestMob(mob)
         if not ExitUnderwaterCity() then return end
     end
 
-    local unconf = FindUnconfirmedMob(mob)
-    if unconf then
-        Attack.Kill(unconf, true)
-        return
+    local noBring = NO_BRING_MOBS[mob or ""]
+
+    if not noBring then
+        local unconf = FindUnconfirmedMob(mob)
+        if unconf then
+            Attack.Kill(unconf, true)
+            return
+        end
     end
 
     local target = FindMob(mob)
