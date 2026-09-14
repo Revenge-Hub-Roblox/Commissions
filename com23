@@ -103,9 +103,6 @@ local COMPLETE_STALL = 3
 local BRING_TEST_INTERVAL = 0.4
 local BRING_MAX_FAILS     = 3
 
-local PHANTOM_TIME         = 5
-local PHANTOM_RELEASE_WAIT = 2
-
 local UW_X             = 50000
 local UW_ENTER         = Vector3.new(4050.31, -3, -1814.12)
 local UW_CITY_EXIT     = Vector3.new(61170.05, -3, 1952.83)
@@ -115,12 +112,9 @@ local UW_REMOTE_EVERY  = 1.5
 local UW_MAX_TIME      = 60
 local UW_ARRIVE_RADIUS = 60
 
-local SEA2_MIN_LEVEL   = 701
+local SEA2_MIN_LEVEL   = 700
 local SEA2_DOOR_CF     = CFrame.new(1288.73328, 35.8959961, -1361.06274, -0.70963943, 0, -0.704565167, 0, 1, 0, 0.704565167, 0, -0.70963943)
 local SEA3_MIN_LEVEL   = 1501
-
-local SEA3_FRUIT_HOP_DELAY   = 20
-local SEA3_FRUIT_PICK_RADIUS = 12
 
 local NO_BRING_MOBS = {
     ["Factory Staff"] = true,
@@ -144,6 +138,7 @@ local CompleteStallSince = nil
 local hooked             = {}
 local TravelActive       = false
 local ZouActive          = false
+local Sea2Mode           = false
 
 local DamageConfirmed = {}
 local DamageHP        = {}
@@ -867,7 +862,6 @@ local function ReqEnter(vec)
     end
 end
 
-
 local function AtEntrance()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not root then return false end
@@ -1243,7 +1237,7 @@ local function QuestFarmStep()
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
 
-    if TravelActive or ZouActive then return end
+    if Sea2Mode or TravelActive or ZouActive then return end
 
     local now = tick()
     local quest = GetCurrentQuest()
@@ -1737,26 +1731,72 @@ task.spawn(function()
 end)
 
 local sea2Stage = 0
+local Sea2Mode = false
+local Sea2Announced = false
+local Sea2StuckCount = 0
+local SEA2_STUCK_LIMIT = 20
 
 task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
-            TravelActive = false
-            if not _G.Level then sea2Stage = 0 return end
+            if not _G.Level then Sea2Mode = false return end
             local lvl = GetPlayerLevel() or 0
-            if not (World1 and lvl >= SEA2_MIN_LEVEL) then return end
-            if not CommF then return end
+            if not World1 or lvl < SEA2_MIN_LEVEL then
+                Sea2Mode = false
+                Sea2Announced = false
+                return
+            end
+            if not CommF then
+                Sea2StuckCount = Sea2StuckCount + 1
+                if Sea2StuckCount >= SEA2_STUCK_LIMIT then
+                    UpdateStatus("Sea 2: CommF_ missing too long, hopping")
+                    Sea2StuckCount = 0
+                    Hop()
+                end
+                return
+            end
+
+            Sea2Mode = true
             TravelActive = true
 
-            local door
-            pcall(function() door = workspace.Map.Ice.Door end)
+            if GetCurrentQuest() then
+                pcall(function() CommF:InvokeServer("AbandonQuest") end)
+                ResetQuestState()
+            end
 
-            local doorLocked = door and door.CanCollide == true and door.Transparency == 0
+            if not Sea2Announced then
+                Sea2Announced = true
+                UpdateStatus("Sea 2 trigger active (lvl " .. tostring(lvl) .. "), quest farming halted")
+            end
 
-            if doorLocked then
-                UpdateStatus("Sea 2: door locked, getting key")
+            local travelFailed = false
 
+            local door, doorPart = nil, nil
+            pcall(function()
+                door = workspace.Map.Ice.Door
+            end)
+            if door then
+                if door:IsA("BasePart") then
+                    doorPart = door
+                else
+                    doorPart = door.PrimaryPart or door:FindFirstChildWhichIsA("BasePart")
+                end
+            end
+
+            local doorState = "missing"
+            if doorPart then
+                if doorPart.CanCollide == true and doorPart.Transparency == 0 then
+                    doorState = "locked"
+                elseif doorPart.CanCollide == false and doorPart.Transparency == 1 then
+                    doorState = "open"
+                else
+                    doorState = "unknown"
+                end
+            end
+
+            if doorState == "locked" then
                 if sea2Stage == 0 then
+                    UpdateStatus("Sea 2: requesting key from Detective")
                     pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
                     sea2Stage = 1
                 elseif sea2Stage == 1 then
@@ -1764,37 +1804,109 @@ task.spawn(function()
                     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                     if root and (root.Position - SEA2_DOOR_CF.Position).Magnitude <= 15 then
                         sea2Stage = 2
+                    else
+                        Sea2StuckCount = Sea2StuckCount + 1
+                        if Sea2StuckCount >= SEA2_STUCK_LIMIT then
+                            UpdateStatus("Sea 2: cannot reach door, hopping")
+                            Sea2StuckCount = 0
+                            Hop()
+                        end
                     end
                 elseif sea2Stage == 2 then
+                    UpdateStatus("Sea 2: using key")
                     EquipWeapon("Key")
                     pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
                     task.wait(1)
-                    if door and not (door.CanCollide == true and door.Transparency == 0) then
+                    if not (doorPart.CanCollide == true and doorPart.Transparency == 0) then
                         sea2Stage = 0
                         UpdateStatus("Sea 2: door unlocked")
+                    else
+                        Sea2StuckCount = Sea2StuckCount + 1
+                        if Sea2StuckCount >= SEA2_STUCK_LIMIT then
+                            UpdateStatus("Sea 2: UseKey does not unlock door, hopping")
+                            Sea2StuckCount = 0
+                            Hop()
+                        end
                     end
                 end
 
-            elseif door and door.CanCollide == false and door.Transparency == 1 then
+            elseif doorState == "open" then
                 sea2Stage = 0
                 UpdateStatus("Sea 2: killing Ice Admiral")
 
                 local adm = GetConnectionEnemies("Ice Admiral")
                 if adm and Attack.Alive(adm) then
+                    Sea2StuckCount = 0
                     Attack.Kill(adm, true)
                 else
                     local en = workspace:FindFirstChild("Enemies")
                     local dead = en and en:FindFirstChild("Ice Admiral")
                     if dead and dead:FindFirstChildOfClass("Humanoid") and dead.Humanoid.Health <= 0 then
                         pcall(function() CommF:InvokeServer("TravelDressrosa") end)
+                        task.wait(2)
+                        if World1 then
+                            Sea2StuckCount = Sea2StuckCount + 1
+                            if Sea2StuckCount >= 3 then
+                                UpdateStatus("Sea 2: TravelDressrosa failed 3x, hopping")
+                                Sea2StuckCount = 0
+                                Hop()
+                            end
+                        else
+                            Sea2StuckCount = 0
+                        end
                     else
-                        _tp(SEA2_DOOR_CF)
+                        Sea2StuckCount = Sea2StuckCount + 1
+                        if Sea2StuckCount >= SEA2_STUCK_LIMIT then
+                            UpdateStatus("Sea 2: Ice Admiral not spawning, hopping")
+                            Sea2StuckCount = 0
+                            Hop()
+                        else
+                            UpdateStatus("Sea 2: waiting for Ice Admiral spawn")
+                            _tp(SEA2_DOOR_CF)
+                        end
                     end
                 end
 
-            else
-                sea2Stage = 0
+            elseif doorState == "unknown" then
+                UpdateStatus("Sea 2: door state unknown (CanCollide=" ..
+                    tostring(doorPart.CanCollide) .. ", Transparency=" ..
+                    tostring(doorPart.Transparency) .. "), trying travel")
                 pcall(function() CommF:InvokeServer("TravelDressrosa") end)
+                task.wait(2)
+                if World1 then
+                    Sea2StuckCount = Sea2StuckCount + 1
+                    if Sea2StuckCount >= SEA2_STUCK_LIMIT then
+                        UpdateStatus("Sea 2: unknown door state persists, hopping")
+                        Sea2StuckCount = 0
+                        Hop()
+                    end
+                else
+                    Sea2StuckCount = 0
+                end
+
+            else
+                UpdateStatus("Sea 2: door not found, fallback chain")
+                pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
+                task.wait(0.3)
+                pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
+                task.wait(0.5)
+                pcall(function() CommF:InvokeServer("TravelDressrosa") end)
+                task.wait(1)
+                if World1 then
+                    Sea2StuckCount = Sea2StuckCount + 1
+                    if Sea2StuckCount >= SEA2_STUCK_LIMIT then
+                        UpdateStatus("Sea 2: fallback chain failed, hopping")
+                        Sea2StuckCount = 0
+                        Hop()
+                    end
+                else
+                    Sea2StuckCount = 0
+                end
+
+                local adm = GetConnectionEnemies("Ice Admiral")
+                if adm then
+                    Attack.Kill(adm, true)
+                end
             end
         end)
     end
@@ -1909,7 +2021,7 @@ task.spawn(function()
                     Sea3FruitHop = false
                     break
                 end
-                if activeTarget and (activeTarget.Position - handle.Position).Magnitude > 20 then
+                if activeTarget and handle.Parent and (activeTarget.Position - handle.Position).Magnitude > 20 then
                     _tp(handle.CFrame, true)
                 end
                 task.wait(0.2)
@@ -2064,6 +2176,9 @@ LocalPlayer.CharacterAdded:Connect(function()
     EntHighlight, EntBillboard = nil, nil
     CompleteStallSince = nil
     sea2Stage = 0
+    Sea2Mode = false
+    Sea2StuckCount = 0
+    Sea2Announced = false
     ResetQuestState()
     plateIndex = 1
     table.clear(DamageConfirmed)
