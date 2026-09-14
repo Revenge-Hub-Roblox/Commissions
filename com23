@@ -1,17 +1,33 @@
 --[[
-    OK Hub - Auto Quest Farm (Full + Damage-Confirmed Bring)
-    • ⚔ BRING ПОСЛЕ УРОНА: bring применяется ТОЛЬКО к мобам, которым мы уже
-      нанесли урон (сервер подтвердил прогрузку). Персонаж облетает каждого
-      квестового моба по очереди, и только после этого начинается стак.
-    • UNDERWATER ROUTE v3.1: Entrance (4050, -1.7, -1814) снаружи, Exit
-      (61170, -2, 1953) внутри. Подсветка с валидацией. Квест не берётся до входа.
-    • Движение: ровно 200 sps, ресинк без рывков, watchdog полёта
-    • Честная ротация ударов, детекция квеста: TrackedQuestFrame + анти-путаница
-    • On-join: Pirates, коды, BuyHaki, anti-afk, hop при админе
-    • В составе Auto Farm: Buso, Melee points, Travel Sea2 (700+), Sea3 (1500+)
+    OK Hub - Auto Quest Farm (Config Edition)
+    • Конфиг через getgenv().OKHUB_CONFIG (задаётся ДО loadstring)
+    • Без GUI: Auto Farm работает сразу из конфига, Bring встроен
+    • Auto Buy Random Fruit, Auto Store Fruit, Discord Webhook (lvl + money + fruits)
+    • QueueOnTeleport: перезапуск после хопа/телепорта
+    • Damage-confirmed bring: только урон получившие мобы стягиваются в стак
+    • Underwater route v3.1, ровно 200 sps, watchdog, честная ротация ударов
 ]]
 
 repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
+
+-- ═════════════════════════════════════════════════════════
+--  CONFIG (из getgenv().OKHUB_CONFIG или дефолты)
+-- ═════════════════════════════════════════════════════════
+local cfg = getgenv().OKHUB_CONFIG or {}
+
+local function CfgBool(key, default)
+    if type(cfg[key]) == "boolean" then return cfg[key] end
+    return default
+end
+
+local CONFIG = {
+    AutoFarm           = CfgBool("AutoFarm", true),
+    AutoBuyRandomFruit = CfgBool("AutoBuyRandomFruit", true),
+    AutoStoreFruit     = CfgBool("AutoStoreFruit", true),
+    Webhook            = CfgBool("Webhook", true),
+    WebhookURL         = (type(cfg.WebhookURL) == "string" and cfg.WebhookURL) or "",
+    QueueOnTeleport    = CfgBool("QueueOnTeleport", true),
+}
 
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -28,14 +44,11 @@ local World1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
 local World2 = game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
 local World3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
 
-getgenv()._G = getgenv()._G or {}
 _G.SelectWeapon = "Melee"
 _G.ChooseWP     = "Melee"
-_G.Level        = false
-_G.AutoFarmNear = false
-_G.AutoKillMob  = false
+_G.Level        = CONFIG.AutoFarm   -- 🔧 фарм включается сразу из конфига
 _G.Auto_Melee   = true
-_B              = true
+_B              = true               -- bring встроен в Auto Farm
 
 local Sec         = 0.06
 local shouldTween = false
@@ -78,6 +91,19 @@ pcall(function()
     end
 end)
 
+-- ═════════════════════════════════════════════════════════
+--  QUEUE ON TELEPORT (перезапуск после хопа)
+-- ═════════════════════════════════════════════════════════
+if CONFIG.QueueOnTeleport and queue_on_teleport then
+    local self_src = [[
+getgenv().OKHUB_CONFIG = ]] .. HttpService:JSONEncode(cfg) .. [[
+
+loadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com23'))()
+]]
+    queue_on_teleport(self_src)
+    print("[OK Hub] QueueOnTeleport: on")
+end
+
 -- ==================== НАСТРОЙКИ ====================
 local MOVE_SPEED = 200
 
@@ -86,7 +112,6 @@ local QUEST_CONFIRM_WAIT = 6
 local GUI_LAG            = 1.5
 local SETTLE_RANGE       = 15
 
--- watchdog полёта
 local WD_TICK        = 0.4
 local WD_ARRIVE_DIST = 30
 local WD_STUCK_DIST  = 1.5
@@ -94,14 +119,12 @@ local WD_STUCK_TIME  = 1.2
 
 local COMPLETE_STALL = 3
 
--- bring-верификация
 local BRING_TEST_INTERVAL = 0.4
 local BRING_MAX_FAILS     = 3
 
--- 🔧 UNDERWATER CITY ROUTE (Sea 1 FishmanQuest)
 local UW_X             = 50000
-local UW_ENTER         = Vector3.new(4050.31, -3, -1814.12)   -- ВХОД (снаружи)
-local UW_CITY_EXIT     = Vector3.new(61170.05, -3, 1952.83)      -- ВЫХОД (внутри города)
+local UW_ENTER         = Vector3.new(4050.31, -1.69, -1814.12)
+local UW_CITY_EXIT     = Vector3.new(61170.05, -2, 1952.83)
 local UW_OUT           = Vector3.new(4050, 30, -1814)
 local UW_QUESTSPOT     = Vector3.new(61122, 25, 1569)
 local UW_REMOTE_EVERY  = 1.5
@@ -110,9 +133,7 @@ local UW_ARRIVE_RADIUS = 60
 
 local UWRouteBusy = false
 
-local QUEST_GIVERS = {
-    -- { NPC = "Bandit Quest Giver", Level = 1 },
-}
+local QUEST_GIVERS = {}
 
 -- ==================== СОСТОЯНИЕ ====================
 local QuestState = {
@@ -127,12 +148,11 @@ local QuestState = {
 local QuestKillCount     = 0
 local CompleteStallSince = nil
 local hooked             = {}
-local SelectMob          = nil
 local TravelActive       = false
 local ZouActive          = false
 
--- ⚔ damage-confirmed bring
-local DamageConfirmed = {}  -- [model] = true → мобу нанесли урон, можно бринжать
+local DamageConfirmed = {}
+local DamageHP        = {}  -- 🔧 чистое HP-хранилище (вместо грязных строковых ключей)
 local BringFails      = {}
 local BringLastChk    = {}
 local BringStuck      = {}
@@ -145,11 +165,11 @@ local function UpdateStatus(t)
     if t == lastStatus then return end
     lastStatus = t
     print("[OK Hub] " .. t)
-    if StatusLabel then pcall(function() StatusLabel:SetText(t) end) end
 end
 
 local function CleanupMobTables(m)
     DamageConfirmed[m] = nil
+    DamageHP[m]        = nil
     BringFails[m]      = nil
     BringLastChk[m]    = nil
     BringStuck[m]      = nil
@@ -211,7 +231,7 @@ end)
 task.spawn(function()
     while task.wait() do
         pcall(function()
-            local farming = _G.Level or _G.AutoFarmNear or _G.AutoKillMob
+            local farming = _G.Level
             OnFarm = farming
             shouldTween = farming
             local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -337,7 +357,7 @@ task.spawn(function()
     end
 end)
 
--- ==================== BRING (только damage-confirmed) ====================
+-- ==================== BRING (damage-confirmed) ====================
 
 task.spawn(function()
     if not sethiddenproperty then
@@ -367,7 +387,7 @@ local function ReleaseMob(v, hum, root)
     end)
 end
 
--- ⚔ в стак идут ТОЛЬКО мобы, которым мы уже нанесли урон
+-- ⚔ в стак только урон получившие мобы
 local function BringEnemy(Mon)
     if not _B or not Mon or not Mon:FindFirstChild("HumanoidRootPart") then return end
     pcall(function()
@@ -382,7 +402,7 @@ local function BringEnemy(Mon)
 
         for _, v in pairs(enemies:GetChildren()) do
             if v ~= Mon and v.Name == Mon.Name
-                and not NoBring[v] and DamageConfirmed[v] then   -- ⚔ только урон получившие
+                and not NoBring[v] and DamageConfirmed[v] then
                 local hum  = v:FindFirstChildOfClass("Humanoid")
                 local root = v:FindFirstChild("HumanoidRootPart")
                 if hum and root and hum.Health > 0 then
@@ -434,7 +454,6 @@ Attack.Kill = function(model, active)
     local hrp = model:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- ⚔ bring тянется только к уже обстрелянным (подтверждённым уроном) мобам
     BringEnemy(model)
 
     EquipWeapon(_G.SelectWeapon)
@@ -461,7 +480,7 @@ local PLAYER_RANGE = 60
 
 task.spawn(function()
     while task.wait(0.03) do
-        if not (_G.Level or _G.AutoFarmNear or _G.AutoKillMob) then continue end
+        if not _G.Level then continue end
 
         pcall(function()
             local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -544,19 +563,16 @@ task.spawn(function()
                 end
             end
 
-            -- ⚔ ПОДТВЕРЖДЕНИЕ УРОНА: HP изменилось у моба из чанка → он прогружен,
-            -- сервер его видит → с этого момента его можно бринжать
+            -- ⚔ подтверждение урона: HP изменилось → моб прогружен, можно бринжать
             for _, v in ipairs(pool) do
                 local hum = v.mob:FindFirstChildOfClass("Humanoid")
-                if hum and not DamageConfirmed[v.mob] then
-                    local rec = DamageConfirmed.HP and nil or nil
-                    -- первый раз запоминаем HP
-                    local hp0 = DamageConfirmed["hp_" .. tostring(v.mob)]
+                if hum then
+                    local hp0 = DamageHP[v.mob]
                     if hp0 == nil then
-                        DamageConfirmed["hp_" .. tostring(v.mob)] = hum.Health
+                        DamageHP[v.mob] = hum.Health
                     elseif math.abs(hum.Health - hp0) > 0.5 then
                         DamageConfirmed[v.mob] = true
-                        DamageConfirmed["hp_" .. tostring(v.mob)] = nil
+                        DamageHP[v.mob] = hum.Health
                     end
                 end
             end
@@ -694,6 +710,7 @@ task.spawn(function()
             for m in pairs(DamageConfirmed) do
                 if typeof(m) == "Instance" and not m.Parent then
                     DamageConfirmed[m] = nil
+                    DamageHP[m] = nil
                 end
             end
         end)
@@ -764,7 +781,7 @@ local function ReqEnter(vec)
     end
 end
 
--- 🔍 подсветка Entrance
+-- подсветка Entrance
 local EntHighlight, EntBillboard = nil, nil
 local function SetupEntranceVisual()
     if EntHighlight and EntHighlight.Parent then return end
@@ -776,19 +793,13 @@ local function SetupEntranceVisual()
         if not ent then
             ent = workspace:FindFirstChild("Entrance", true)
         end
-        if not ent then
-            warn("[OK Hub] ❌ Entrance не найден — маршрут по координатам")
-            return
-        end
+        if not ent then return end
 
         local base = ent:IsA("BasePart") and ent
             or ent.PrimaryPart or ent:FindFirstChildWhichIsA("BasePart")
         if not base then return end
 
-        if base.Position.X > UW_X then
-            warn("[OK Hub] ⚠ Парт Entrance внутри города — не вход, использую координаты")
-            return
-        end
+        if base.Position.X > UW_X then return end
 
         print("[OK Hub] ✅ Entrance найден: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
 
@@ -895,7 +906,6 @@ local function ExitUnderwaterCity()
             or (workspace.Map and workspace.Map:FindFirstChild("Exit", true))
         if ex and ex:IsA("BasePart") then
             exitPos = ex.Position
-            print("[OK Hub] ✅ Exit найден: " .. ex:GetFullName() .. " @ " .. tostring(ex.Position))
         end
     end)
 
@@ -1101,7 +1111,7 @@ local function FindMob(mob)
     return best
 end
 
--- ⚔ ближайший НЕ подтверждённый уроном квестовый моб (облетаем по одному)
+-- ⚔ ближайший НЕ подтверждённый квестовый моб (облетаем по одному)
 local function FindUnconfirmedMob(mob)
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return nil end
@@ -1129,14 +1139,14 @@ local function FarmQuestMob(mob)
         if not ExitUnderwaterCity() then return end
     end
 
-    -- ⚔ фаза 1: облетаем неподтверждённых (bring их не трогает)
+    -- ⚔ фаза 1: облетаем неподтверждённых
     local unconf = FindUnconfirmedMob(mob)
     if unconf then
         Attack.Kill(unconf, true)
         return
     end
 
-    -- ⚔ фаза 2: все подтверждены → обычный фарм со стаком
+    -- ⚔ фаза 2: все подтверждены → фарм со стаком
     local target = FindMob(mob)
     if target then
         Attack.Kill(target, true)
@@ -1340,37 +1350,162 @@ task.spawn(function()
     end
 end)
 
--- Nearest
+-- ═════════════════════════════════════════════════════════
+--  🔧 ДОП. ФУНКЦИИ ИЗ КОНФИГА
+-- ═════════════════════════════════════════════════════════
+
+-- Auto Buy Random Fruit
 task.spawn(function()
-    while task.wait(0.08) do
-        if not _G.AutoFarmNear then continue end
+    while task.wait(Sec) do
+        if not CONFIG.AutoBuyRandomFruit then continue end
         pcall(function()
-            local enemies = workspace:FindFirstChild("Enemies")
-            if not enemies then return end
-            for _, v in pairs(enemies:GetChildren()) do
-                if Attack.Alive(v) then
-                    Attack.Kill(v, true)
-                    break
-                end
+            if CommF then
+                CommF:InvokeServer("Cousin", "Buy")
             end
         end)
     end
 end)
 
--- Selected Mob
+-- Auto Store Fruit
+local function UpdStFruit()
+    local backpack = LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
+    for _, x in next, backpack:GetChildren() do
+        local StoreFruit = x:FindFirstChild("EatRemote", true)
+        if StoreFruit then
+            CommF:InvokeServer(
+                "StoreFruit",
+                StoreFruit.Parent:GetAttribute("OriginalName"),
+                backpack:FindFirstChild(x.Name)
+            )
+        end
+    end
+end
+
 task.spawn(function()
-    while task.wait(0.08) do
-        if not _G.AutoKillMob or not SelectMob then continue end
-        pcall(function()
-            local enemies = workspace:FindFirstChild("Enemies")
-            if not enemies then return end
-            for _, v in pairs(enemies:GetChildren()) do
-                if v.Name == SelectMob and Attack.Alive(v) then
-                    Attack.Kill(v, true)
-                    break
+    while task.wait(Sec) do
+        if not CONFIG.AutoStoreFruit then continue end
+        pcall(UpdStFruit)
+    end
+end)
+
+-- ═════════════════════════════════════════════════════════
+--  📡 WEBHOOK (lvl + money + фрукты в инвентаре)
+-- ═════════════════════════════════════════════════════════
+
+local function GetMoney()
+    local v = nil
+    pcall(function()
+        local ls = LocalPlayer:FindFirstChild("leaderstats")
+        if ls then
+            for _, n in ipairs({ "Beli", "Money", "Cash" }) do
+                local m = ls:FindFirstChild(n)
+                if m then v = m.Value break end
+            end
+        end
+        if not v then
+            local d = LocalPlayer:FindFirstChild("Data")
+            local m = d and (d:FindFirstChild("Beli") or d:FindFirstChild("Money"))
+            if m then v = m.Value end
+        end
+    end)
+    return v or "?"
+end
+
+local function GetFruitsList()
+    local fruits = {}
+    pcall(function()
+        -- в инвентаре (склад)
+        if CommF then
+            local inv = CommF:InvokeServer("getInventoryFruits")
+            if type(inv) == "table" then
+                for _, v in pairs(inv) do
+                    if type(v) == "table" and v.Name then
+                        table.insert(fruits, v.Name)
+                    end
                 end
             end
-        end)
+        end
+    end)
+    pcall(function()
+        -- в рюкзаке/на персонаже
+        local bp = LocalPlayer:FindFirstChild("Backpack")
+        if bp then
+            for _, t in pairs(bp:GetChildren()) do
+                if t:IsA("Tool") and t:FindFirstChild("EatRemote", true) then
+                    table.insert(fruits, t.Name .. " (backpack)")
+                end
+            end
+        end
+        local ch = LocalPlayer.Character
+        if ch then
+            for _, t in pairs(ch:GetChildren()) do
+                if t:IsA("Tool") and t:FindFirstChild("EatRemote", true) then
+                    table.insert(fruits, t.Name .. " (equipped)")
+                end
+            end
+        end
+    end)
+    return fruits
+end
+
+local WEBHOOK_INTERVAL = 300  -- раз в 5 минут
+local lastWebhook = 0
+local lastWebhookLvl = nil
+
+local function SendWebhook(reason)
+    if not CONFIG.Webhook or CONFIG.WebhookURL == "" then return end
+    if not request and not (syn and syn.request) and not http_request then
+        warn("[OK Hub] ❌ request недоступен в экзекуторе — вебхук не отправлен")
+        return
+    end
+
+    local lvl = GetPlayerLevel() or "?"
+    local money = GetMoney()
+    local fruits = GetFruitsList()
+    local fruitStr = (#fruits > 0) and table.concat(fruits, ", ") or "нет"
+
+    local payload = HttpService:JSONEncode({
+        username = "OK Hub",
+        embeds = {{
+            title = "📊 Статус аккаунта" .. (reason and (" — " .. reason) or ""),
+            color = 65280,
+            fields = {
+                { name = "Игрок",        value = tostring(LocalPlayer.Name), inline = true },
+                { name = "Уровень",      value = tostring(lvl),              inline = true },
+                { name = "Деньги",       value = tostring(money),            inline = true },
+                { name = "Фрукты",       value = fruitStr,                   inline = false },
+                { name = "Сервер",       value = "job: " .. tostring(game.JobId), inline = false },
+            },
+            footer = { text = "OK Hub • " .. os.date("%H:%M:%S") },
+        }},
+    })
+
+    local req = request or (syn and syn.request) or http_request
+    pcall(function()
+        req({
+            Url = CONFIG.WebhookURL,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = payload,
+        })
+    end)
+end
+
+task.spawn(function()
+    task.wait(20) -- первый отчёт после захода
+    SendWebhook("заход")
+    lastWebhook = tick()
+    lastWebhookLvl = GetPlayerLevel()
+    while true do
+        task.wait(30)
+        local lvl = GetPlayerLevel()
+        local changed = lvl ~= lastWebhookLvl
+        if (tick() - lastWebhook >= WEBHOOK_INTERVAL) or changed then
+            SendWebhook(changed and "левелап" or nil)
+            lastWebhook = tick()
+            lastWebhookLvl = lvl
+        end
     end
 end)
 
@@ -1733,201 +1868,6 @@ task.spawn(function()
     end
 end)
 
--- ==================== UI (OBSIDIAN + фолбэк) ====================
-local Obsidian = nil
-local UI_SOURCES = {
-    "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Source.lua",
-    "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Source.lua",
-    "https://cdn.jsdelivr.net/gh/deividcomsono/Obsidian@main/Source.lua",
-}
-for _, url in ipairs(UI_SOURCES) do
-    local ok, result = pcall(function()
-        local src = game:HttpGet(url)
-        assert(src and #src > 500 and not src:lower():find("<!doctype html"), "битый ответ")
-        return loadstring(src)()
-    end)
-    if ok and type(result) == "table" and result.CreateWindow then
-        Obsidian = result
-        break
-    end
-end
-
-local function BuildFallbackUI()
-    pcall(function()
-        local pg = LocalPlayer:WaitForChild("PlayerGui")
-        local gui = Instance.new("ScreenGui")
-        gui.Name = "OKHub_Fallback"
-        gui.ResetOnSpawn = false
-        gui.Parent = pg
-
-        local frame = Instance.new("Frame")
-        frame.Size = UDim2.fromOffset(210, 170)
-        frame.Position = UDim2.new(0, 12, 0.4, 0)
-        frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-        frame.BorderSizePixel = 0
-        frame.Active = true
-        frame.Draggable = true
-        frame.Parent = gui
-        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = frame
-
-        local title = Instance.new("TextLabel")
-        title.Size = UDim2.new(1, 0, 0, 26)
-        title.BackgroundTransparency = 1
-        title.Text = "OK Hub | Auto Farm"
-        title.TextColor3 = Color3.new(1, 1, 1)
-        title.Font = Enum.Font.GothamBold
-        title.TextSize = 14
-        title.Parent = frame
-
-        local function mkBtn(y, text, state)
-            local b = Instance.new("TextButton")
-            b.Size = UDim2.new(1, -16, 0, 28)
-            b.Position = UDim2.new(0, 8, 0, y)
-            b.BackgroundColor3 = state and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
-            b.TextColor3 = Color3.new(1, 1, 1)
-            b.Font = Enum.Font.Gotham
-            b.TextSize = 12
-            b.Text = text
-            b.Parent = frame
-            local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 6); bc.Parent = b
-            return b
-        end
-
-        local tgl = mkBtn(32, "Auto Farm Level: OFF", false)
-        tgl.MouseButton1Click:Connect(function()
-            _G.Level = not _G.Level
-            tgl.Text = "Auto Farm Level: " .. (_G.Level and "ON" or "OFF")
-            tgl.BackgroundColor3 = _G.Level and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
-        end)
-
-        local km = mkBtn(66, "Auto Kill Mob: OFF", false)
-        km.MouseButton1Click:Connect(function()
-            _G.AutoKillMob = not _G.AutoKillMob
-            km.Text = "Auto Kill Mob: " .. (_G.AutoKillMob and "ON" or "OFF")
-            km.BackgroundColor3 = _G.AutoKillMob and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
-        end)
-
-        local br = mkBtn(100, "Bring: " .. (_B and "ON" or "OFF"), _B)
-        br.MouseButton1Click:Connect(function()
-            _B = not _B
-            br.Text = "Bring: " .. (_B and "ON" or "OFF")
-            br.BackgroundColor3 = _B and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
-        end)
-
-        local st = Instance.new("TextLabel")
-        st.Size = UDim2.new(1, -16, 0, 40)
-        st.Position = UDim2.new(0, 8, 1, -44)
-        st.BackgroundTransparency = 1
-        st.TextColor3 = Color3.fromRGB(200, 200, 200)
-        st.TextWrapped = true
-        st.Font = Enum.Font.Gotham
-        st.TextSize = 11
-        st.TextXAlignment = Enum.TextXAlignment.Left
-        st.Text = "Idle"
-        st.Parent = frame
-
-        StatusLabel = { SetText = function(_, t) st.Text = tostring(t) end }
-        lastStatus = ""
-    end)
-end
-
-if Obsidian then
-    local ok, err = pcall(function()
-        local Window = Obsidian:CreateWindow({
-            Title = "OK Hub | Auto Quest Farm",
-            Footer = "damage-confirmed bring • underwater v3.1",
-            Center = true,
-            AutoShow = true,
-            ToggleKeybind = Enum.KeyCode.RightControl,
-        })
-
-        local FarmTab = Window:AddTab({ Title = "Farm", Icon = "swords" })
-        local SetTab  = Window:AddTab({ Title = "Settings", Icon = "settings" })
-
-        local Main = FarmTab:AddLeftGroupbox("Auto Farm")
-        Main:AddToggle("Level", {
-            Text = "Auto Farm Level (квесты + travel)",
-            Default = false,
-            Callback = function(v)
-                _G.Level = v
-                if v then QuestState.LastTry = 0 end
-            end,
-        })
-        Main:AddToggle("Near", {
-            Text = "Auto Farm Nearest",
-            Default = false,
-            Callback = function(v) _G.AutoFarmNear = v end,
-        })
-        Main:AddToggle("KillMob", {
-            Text = "Auto Kill Mob (по выбору)",
-            Default = false,
-            Callback = function(v) _G.AutoKillMob = v end,
-        })
-        Main:AddDropdown("Weapon", {
-            Values = { "Melee", "Sword", "Blox Fruit", "Gun" },
-            Default = "Melee",
-            Multi = false,
-            Text = "Weapon",
-            Callback = function(v) _G.ChooseWP = v end,
-        })
-
-        local mobs = World1 and { "Bandit","Monkey","Gorilla","Pirate","Brute","Desert Bandit","Snow Bandit","Chief Petty Officer","Sky Bandit","Military Soldier","Fishman Warrior","Shanda","Royal Squad","Galley Captain" }
-            or World2 and { "Raider","Mercenary","Swan Pirate","Factory Staff","Marine Lieutenant","Zombie","Vampire","Snow Trooper","Lab Subordinate","Magma Ninja","Ship Deckhand","Arctic Warrior","Water Fighter" }
-            or { "Pirate Millionaire","Dragon Crew Warrior","Marine Commodore","Fishman Raider","Forest Pirate","Mythological Pirate","Reborn Skeleton","Cookie Crafter","Cocoa Warrior" }
-
-        local MobG = FarmTab:AddRightGroupbox("Mobs")
-        MobG:AddDropdown("MobSel", {
-            Values = mobs,
-            Default = mobs[1],
-            Multi = false,
-            Text = "Mob (для Auto Kill Mob)",
-            Callback = function(v) SelectMob = v end,
-        })
-
-        local St = FarmTab:AddRightGroupbox("Статус")
-        StatusLabel = St:AddParagraph("Статус", "Idle")
-        lastStatus = ""
-
-        local S1 = SetTab:AddLeftGroupbox("Bring")
-        S1:AddToggle("Bring", {
-            Text = "Bring Mobs (после урона)",
-            Default = true,
-            Callback = function(v) _B = v end,
-        })
-
-        local S2 = SetTab:AddRightGroupbox("Прочее")
-        S2:AddToggle("HopAdmin", {
-            Text = "Hop при админе",
-            Default = true,
-            Callback = function(v) getgenv().HopServerAdmin = v end,
-        })
-        S2:AddButton({
-            Text = "Сбросить состояние квеста",
-            Func = function()
-                pcall(function() CommF:InvokeServer("AbandonQuest") end)
-                ResetQuestState()
-                lastStatus = ""
-            end,
-        })
-        S2:AddButton({
-            Text = "Выгрузить скрипт",
-            Func = function()
-                _G.Level, _G.AutoFarmNear, _G.AutoKillMob = false, false, false
-                shouldTween = false
-                pcall(function() block:Destroy() end)
-                pcall(function() Obsidian:Destroy() end)
-            end,
-        })
-    end)
-    if not ok then
-        warn("[OK Hub] Ошибка Obsidian UI: " .. tostring(err))
-        Obsidian = nil
-    end
-end
-if not Obsidian then
-    BuildFallbackUI()
-end
-
 -- ==================== HOOKS ====================
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
@@ -1940,6 +1880,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     ResetQuestState()
     plateIndex = 1
     table.clear(DamageConfirmed)
+    table.clear(DamageHP)
     table.clear(BringFails)
     table.clear(BringLastChk)
     table.clear(BringStuck)
@@ -1947,4 +1888,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     table.clear(HitOrder)
 end)
 
-print("[OK Hub] Full loaded — damage-confirmed bring + underwater v3.1")
+print("[OK Hub] Config Edition loaded — AutoFarm: " .. tostring(CONFIG.AutoFarm)
+    .. " | Fruits: " .. tostring(CONFIG.AutoBuyRandomFruit) .. "/" .. tostring(CONFIG.AutoStoreFruit)
+    .. " | Webhook: " .. tostring(CONFIG.Webhook))
