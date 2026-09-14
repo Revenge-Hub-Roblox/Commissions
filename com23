@@ -20,6 +20,7 @@ local CONFIG = {
             "Love-Love",
             "Creation-Creation",
             "Spider-Spider",
+            "Light-Light",
             "Sound-Sound",
             "Phoenix-Phoenix",
             "Pain-Pain",
@@ -87,14 +88,45 @@ pcall(function()
     end
 end)
 
-if CONFIG.QueueOnTeleport and queue_on_teleport then
-    local self_src = [[
-getgenv().FROZENT0_CONFIG = ]] .. HttpService:JSONEncode(cfg) .. [[
+if CONFIG.QueueOnTeleport then
+    local qfn = queue_on_teleport
+        or (syn and syn.queue_on_teleport)
+        or (fluxus and fluxus.queue_on_teleport)
+        or (getgenv().queue_on_teleport)
 
-loadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com23'))()
-]]
-    queue_on_teleport(self_src)
-    print("[Frozent0] QueueOnTeleport: on")
+    if qfn then
+        local function SerializeConfig(t)
+            local parts = {}
+            for k, v in pairs(t) do
+                if type(v) == "boolean" then
+                    table.insert(parts, k .. " = " .. tostring(v))
+                elseif type(v) == "number" then
+                    table.insert(parts, k .. " = " .. tostring(v))
+                elseif type(v) == "string" then
+                    table.insert(parts, k .. ' = "' .. tostring(v):gsub('\\', '\\\\'):gsub('"', '\\"') .. '"')
+                elseif type(v) == "table" then
+                    local inner = {}
+                    for _, item in ipairs(v) do
+                        if type(item) == "string" then
+                            table.insert(inner, '"' .. tostring(item):gsub('\\', '\\\\'):gsub('"', '\\"') .. '"')
+                        else
+                            table.insert(inner, tostring(item))
+                        end
+                    end
+                    table.insert(parts, k .. " = { " .. table.concat(inner, ", ") .. " }")
+                end
+            end
+            return "{ " .. table.concat(parts, ", ") .. " }"
+        end
+
+        local self_src = "getgenv().FROZENT0_CONFIG = " .. SerializeConfig(cfg)
+            .. "\n\nloadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com23'))()"
+
+        pcall(function() qfn(self_src) end)
+        print("[Frozent0] QueueOnTeleport: on")
+    else
+        warn("[Frozent0] queue_on_teleport not available in this executor")
+    end
 end
 
 local MOVE_SPEED = 200
@@ -130,6 +162,9 @@ local SEA3_MIN_LEVEL   = 1501
 local NO_BRING_MOBS = {
     ["Factory Staff"] = true,
 }
+
+local REMOTE_CACHE_TTL = 3
+local QUEST_CACHE_TTL  = 0.3
 
 local UWRouteBusy = false
 
@@ -531,9 +566,12 @@ task.spawn(function()
             local enemies = workspace:FindFirstChild("Enemies")
             if not enemies then return end
 
+            local children = enemies:GetChildren()
+            if #children == 0 then return end
+
             local closest, closestDist = nil, 80
             local fbClosest, fbDist = nil, 80
-            for _, v in ipairs(enemies:GetChildren()) do
+            for _, v in ipairs(children) do
                 if not Attack.Alive(v) then continue end
                 if v:FindFirstChild("HumanoidRootPart") and v.Name == "Prisoner" then
                     local badAcc = v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)")
@@ -557,7 +595,7 @@ task.spawn(function()
             local anchorPos = closest.HumanoidRootPart.Position
 
             local pool = {}
-            for _, v in ipairs(enemies:GetChildren()) do
+            for _, v in ipairs(children) do
                 if Attack.Alive(v) and v:FindFirstChild("HumanoidRootPart") then
                     if v.Name == "Prisoner" and v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)") then
                         continue
@@ -694,6 +732,17 @@ local function GetCurrentQuest()
     end)
     if ok then return res end
     return nil
+end
+
+local questCache, questCacheT = nil, 0
+
+local function GetCurrentQuestCached()
+    local now = tick()
+    if now - questCacheT > QUEST_CACHE_TTL then
+        questCache = GetCurrentQuest()
+        questCacheT = now
+    end
+    return questCache
 end
 
 local function ParseProgress(str)
@@ -1251,7 +1300,7 @@ local function QuestFarmStep()
     if Sea2Mode or TravelActive or ZouActive then return end
 
     local now = tick()
-    local quest = GetCurrentQuest()
+    local quest = GetCurrentQuestCached()
 
     if quest then
         QuestState.LastSeen = now
@@ -1780,8 +1829,6 @@ task.spawn(function()
                 UpdateStatus("Sea 2 trigger active (lvl " .. tostring(lvl) .. "), quest farming halted")
             end
 
-            local travelFailed = false
-
             local door, doorPart = nil, nil
             pcall(function()
                 door = workspace.Map.Ice.Door
@@ -1944,34 +1991,76 @@ local function TryTrevor()
     pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "3") end)
 end
 
+local ZOU_CACHE_TTL = 3
+local zouCache = {
+    progress = -1,
+    t = 0,
+    stored = {},
+    openable = {},
+    unlockables = nil,
+    u_t = 0,
+}
+
+local function GetBartiloCached()
+    local now = tick()
+    if now - zouCache.t > ZOU_CACHE_TTL then
+        pcall(function()
+            zouCache.progress = CommF:InvokeServer("BartiloQuestProgress", "Bartilo") or -1
+        end)
+        zouCache.t = now
+    end
+    return zouCache.progress
+end
+
 local function GetStoredFruits()
-    local stored = {}
-    pcall(function()
-        local inv = CommF:InvokeServer("getInventoryFruits")
-        if type(inv) == "table" then
-            for _, v in pairs(inv) do
-                if type(v) == "table" and v.Name then
-                    table.insert(stored, v.Name)
+    local now = tick()
+    if now - zouCache.t > ZOU_CACHE_TTL then
+        local stored = {}
+        pcall(function()
+            local inv = CommF:InvokeServer("getInventoryFruits")
+            if type(inv) == "table" then
+                for _, v in pairs(inv) do
+                    if type(v) == "table" and v.Name then
+                        table.insert(stored, v.Name)
+                    end
                 end
             end
-        end
-    end)
-    return stored
+        end)
+        zouCache.stored = stored
+        zouCache.t = now
+    end
+    return zouCache.stored
 end
 
 local function GetOpenableFruits()
-    local openable = {}
-    pcall(function()
-        local fruits = CommF:InvokeServer("GetFruits")
-        if type(fruits) == "table" then
-            for _, v in pairs(fruits) do
-                if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
-                    table.insert(openable, v.Name)
+    local now = tick()
+    if now - zouCache.t > ZOU_CACHE_TTL then
+        local openable = {}
+        pcall(function()
+            local fruits = CommF:InvokeServer("GetFruits")
+            if type(fruits) == "table" then
+                for _, v in pairs(fruits) do
+                    if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
+                        table.insert(openable, v.Name)
+                    end
                 end
             end
-        end
-    end)
-    return openable
+        end)
+        zouCache.openable = openable
+        zouCache.t = now
+    end
+    return zouCache.openable
+end
+
+local function GetUnlockablesCached()
+    local now = tick()
+    if now - zouCache.u_t > ZOU_CACHE_TTL then
+        pcall(function()
+            zouCache.unlockables = CommF:InvokeServer("GetUnlockables")
+        end)
+        zouCache.u_t = now
+    end
+    return zouCache.unlockables
 end
 
 local function FindGroundFruit()
@@ -2062,14 +2151,12 @@ task.spawn(function()
             if not CommF then return end
             ZouActive = true
 
-            local progress = -1
-            pcall(function() progress = CommF:InvokeServer("BartiloQuestProgress", "Bartilo") end)
+            local progress = GetBartiloCached()
 
             if progress ~= 2 then plateIndex = 1 end
 
             if progress == 3 then
-                local unlockables = nil
-                pcall(function() unlockables = CommF:InvokeServer("GetUnlockables") end)
+                local unlockables = GetUnlockablesCached()
 
                 if unlockables and unlockables.FlamingoAccess ~= nil then
                     Sea3FruitHop = false
@@ -2141,7 +2228,7 @@ task.spawn(function()
                 end
 
             elseif progress == 0 then
-                local q = GetCurrentQuest()
+                local q = GetCurrentQuestCached()
                 local qtext = q and ((q.Name or "") .. " " .. (q.Target or "")) or ""
                 if TextHas(qtext, "Swan Pirates") and TextHas(qtext, "50") then
                     local sp = FindMob("Swan Pirate")
@@ -2190,6 +2277,10 @@ LocalPlayer.CharacterAdded:Connect(function()
     Sea2Mode = false
     Sea2StuckCount = 0
     Sea2Announced = false
+    questCache, questCacheT = nil, 0
+    zouCache.progress = -1
+    zouCache.t = 0
+    zouCache.u_t = 0
     ResetQuestState()
     plateIndex = 1
     table.clear(DamageConfirmed)
