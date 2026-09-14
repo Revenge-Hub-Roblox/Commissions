@@ -1,6 +1,6 @@
 repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 
-local cfg = getgenv().OKHUB_CONFIG or {}
+local cfg = getgenv().FROZENT0_CONFIG or {}
 
 local function CfgBool(key, default)
     if type(cfg[key]) == "boolean" then return cfg[key] end
@@ -16,34 +16,6 @@ local CONFIG = {
     AutoStoreFruit     = CfgBool("AutoStoreFruit", true),
     AllowedSea3Fruits  = (type(cfg.AllowedSea3Fruits) == "table" and cfg.AllowedSea3Fruits)
         or { "Flame-Flame", "Ice-Ice", "Sand-Sand", "Dark-Dark", "Light-Light", "Rubber-Rubber", "Ghost-Ghost", "Magma-Magma" },
-    PickupFruits = (type(cfg.PickupFruits) == "table" and cfg.PickupFruits)
-        or {
-            ["Quake Fruit"]     = "Quake-Quake",
-            ["Buddha Fruit"]    = "Buddha-Buddha",
-            ["Love Fruit"]      = "Love-Love",
-            ["Creation Fruit"]  = "Creation-Creation",
-            ["Spider Fruit"]    = "Spider-Spider",
-            ["Sound Fruit"]     = "Sound-Sound",
-            ["Phoenix Fruit"]   = "Bird-Bird",
-            ["Portal Fruit"]    = "Portal-Portal",
-            ["Lightning Fruit"] = "Lightning-Lightning",
-            ["Pain Fruit"]      = "Pain-Pain",
-            ["Blizzard Fruit"]  = "Blizzard-Blizzard",
-            ["Gravity Fruit"]   = "Gravity-Gravity",
-            ["Mammoth Fruit"]   = "Mammoth-Mammoth",
-            ["T-Rex Fruit"]     = "T-Rex-T-Rex",
-            ["Dough Fruit"]     = "Dough-Dough",
-            ["Shadow Fruit"]    = "Shadow-Shadow",
-            ["Venom Fruit"]     = "Venom-Venom",
-            ["Gas Fruit"]       = "Gas-Gas",
-            ["Spirit Fruit"]    = "Spirit-Spirit",
-            ["Tiger Fruit"]     = "Tiger-Tiger",
-            ["Yeti Fruit"]      = "Yeti-Yeti",
-            ["Magnet Fruit"]    = "Magnet-Magnet",
-            ["Kitsune Fruit"]   = "Kitsune-Kitsune",
-            ["Control Fruit"]   = "Control-Control",
-            ["Dragon Fruit"]    = "Dragon-Dragon",
-        },
 }
 
 local Players           = game:GetService("Players")
@@ -106,7 +78,7 @@ end)
 
 if CONFIG.QueueOnTeleport and queue_on_teleport then
     local self_src = [[
-getgenv().OKHUB_CONFIG = ]] .. HttpService:JSONEncode(cfg) .. [[
+getgenv().FROZENT0_CONFIG = ]] .. HttpService:JSONEncode(cfg) .. [[
 
 loadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com23'))()
 ]]
@@ -150,9 +122,6 @@ local SEA3_MIN_LEVEL   = 1501
 local SEA3_FRUIT_HOP_DELAY   = 20
 local SEA3_FRUIT_PICK_RADIUS = 12
 
-local FRUIT_PICK_TIMEOUT = 60
-local FRUIT_PICK_RADIUS  = 12
-
 local NO_BRING_MOBS = {
     ["Factory Staff"] = true,
 }
@@ -185,9 +154,6 @@ local BringStuck      = {}
 local NoBring         = {}
 local HitOrder        = {}
 local PhantomBlocked  = {}
-local NearSince       = {}
-
-local FruitPickupBusy = false
 
 local lastStatus = ""
 
@@ -207,7 +173,6 @@ local function CleanupMobTables(m)
     NoBring[m]         = nil
     HitOrder[m]        = nil
     PhantomBlocked[m]  = nil
-    NearSince[m]       = nil
 end
 
 local function PhantomRelease(m)
@@ -230,7 +195,6 @@ local function PhantomRelease(m)
     BringStuck[m]      = true
     NoBring[m]         = true
     HitOrder[m]        = nil
-    NearSince[m]       = nil
     PhantomBlocked[m]  = tick() + PHANTOM_RELEASE_WAIT
     UpdateStatus("Phantom mob detected (" .. m.Name .. "), releasing for " .. PHANTOM_RELEASE_WAIT .. "s")
 end
@@ -288,7 +252,7 @@ end)
 task.spawn(function()
     while task.wait() do
         pcall(function()
-            local farming = _G.Level and not FruitPickupBusy
+            local farming = _G.Level
             OnFarm = farming
             shouldTween = farming
             local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -549,7 +513,6 @@ local PLAYER_RANGE = 60
 task.spawn(function()
     while task.wait(0.03) do
         if not _G.Level then continue end
-        if FruitPickupBusy then continue end
 
         pcall(function()
             local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -664,10 +627,7 @@ end)
 
 task.spawn(function()
     while task.wait(1) do
-        if not _G.Level then
-            table.clear(NearSince)
-            continue
-        end
+        if not _G.Level then continue end
         pcall(function()
             local now = tick()
 
@@ -678,48 +638,30 @@ task.spawn(function()
                     PhantomBlocked[m] = nil
                     BringStuck[m] = nil
                     NoBring[m] = nil
-                    NearSince[m] = nil
                 end
             end
-
-            if FruitPickupBusy or TravelActive or ZouActive or not OnFarm then return end
 
             local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            local enemies = workspace:FindFirstChild("Enemies")
-            if not root or not enemies then return end
+            if not root then return end
 
-            local questMob = QuestState.Mob
-            if not questMob then return end
-
-            for _, v in ipairs(enemies:GetChildren()) do
-                local hum = v:FindFirstChildOfClass("Humanoid")
-                local hrp = v:FindFirstChild("HumanoidRootPart")
-
-                if not (hum and hrp and hum.Health > 0) or NO_BRING_MOBS[v.Name] then
-                    NearSince[v] = nil
-                elseif not IsValidQuestMob(v, questMob) then
-                    NearSince[v] = nil
+            for m, lastChange in pairs(DamageHPLast) do
+                if not m.Parent or not Attack.Alive(m) then
+                    DamageHPLast[m] = nil
+                    DamageHP[m] = nil
                 else
-                    local dist = (hrp.Position - root.Position).Magnitude
-                    if dist <= PLAYER_RANGE then
-                        if not NearSince[v] then
-                            NearSince[v] = now
-                        elseif not PhantomBlocked[v] and (now - NearSince[v]) >= PHANTOM_TIME then
-                            local lastChange = DamageHPLast[v]
-                            local hpChangedRecently = lastChange ~= nil and (now - lastChange) < PHANTOM_TIME
-                            if not hpChangedRecently then
-                                NearSince[v] = nil
-                                PhantomRelease(v)
-                            end
-                        end
-                    else
-                        NearSince[v] = nil
+                    if NO_BRING_MOBS[m.Name] then continue end
+                    local hrp = m:FindFirstChild("HumanoidRootPart")
+                    local dist = hrp and (hrp.Position - root.Position).Magnitude or 9e9
+                    local beingHit = HitOrder[m] and (now - HitOrder[m]) < 1.5
+                    local confirmed = DamageConfirmed[m] == true
+                    local near = dist <= PLAYER_RANGE
+
+                    if confirmed and beingHit and near
+                        and not PhantomBlocked[m]
+                        and (now - lastChange) >= PHANTOM_TIME then
+                        PhantomRelease(m)
                     end
                 end
-            end
-
-            for m in pairs(NearSince) do
-                if not m.Parent then NearSince[m] = nil end
             end
         end)
     end
@@ -860,7 +802,6 @@ task.spawn(function()
                     DamageConfirmed[m] = nil
                     DamageHP[m] = nil
                     DamageHPLast[m] = nil
-                    NearSince[m] = nil
                 end
             end
         end)
@@ -1268,7 +1209,7 @@ local function FindUnconfirmedMob(mob)
 end
 
 local function FarmQuestMob(mob)
-    if UWRouteBusy or FruitPickupBusy then return end
+    if UWRouteBusy then return end
 
     local deep = (QuestState.DeepFish == true)
         or (World1 and TextHas(mob or "", "Fishman") or false)
@@ -1355,8 +1296,6 @@ local function ResetQuestState()
 end
 
 local function QuestFarmStep()
-    if FruitPickupBusy then return end
-
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
 
@@ -1859,7 +1798,7 @@ task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
             TravelActive = false
-            if not _G.Level or FruitPickupBusy then return end
+            if not _G.Level then sea2Stage = 0 return end
             local lvl = GetPlayerLevel() or 0
             if not (World1 and lvl >= SEA2_MIN_LEVEL) then return end
             if not CommF then return end
@@ -2026,7 +1965,7 @@ task.spawn(function()
                     Sea3FruitHop = false
                     break
                 end
-                if activeTarget and handle.Parent and (activeTarget.Position - handle.Position).Magnitude > 20 then
+                if activeTarget and (activeTarget.Position - handle.Position).Magnitude > 20 then
                     _tp(handle.CFrame, true)
                 end
                 task.wait(0.2)
@@ -2050,7 +1989,6 @@ task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
             ZouActive = false
-            if FruitPickupBusy then return end
             if not _G.Level then return end
             local lvl = GetPlayerLevel() or 0
             if not (World2 and lvl >= SEA3_MIN_LEVEL) then return end
@@ -2193,7 +2131,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     table.clear(NoBring)
     table.clear(HitOrder)
     table.clear(PhantomBlocked)
-    table.clear(NearSince)
 
     task.wait(1)
     pcall(function()
@@ -2206,5 +2143,4 @@ end)
 
 print("[Frozent0] Config Edition loaded | AutoFarm: " .. tostring(CONFIG.AutoFarm)
     .. " | Webhook: " .. tostring(CONFIG.Webhook)
-    .. " | Sea3Fruits: " .. tostring(#CONFIG.AllowedSea3Fruits)
-    .. " | PickupFruits: " .. tostring(#CONFIG.PickupFruits))
+    .. " | Sea3Fruits: " .. tostring(#CONFIG.AllowedSea3Fruits))
