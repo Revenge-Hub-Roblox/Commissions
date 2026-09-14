@@ -15,7 +15,18 @@ local CONFIG = {
     AutoBuyRandomFruit = CfgBool("AutoBuyRandomFruit", true),
     AutoStoreFruit     = CfgBool("AutoStoreFruit", true),
     AllowedSea3Fruits  = (type(cfg.AllowedSea3Fruits) == "table" and cfg.AllowedSea3Fruits)
-        or { "Flame-Flame", "Ice-Ice", "Sand-Sand", "Dark-Dark", "Light-Light", "Rubber-Rubber", "Ghost-Ghost", "Magma-Magma" },
+        or {
+            "Quake-Quake",
+            "Love-Love",
+            "Creation-Creation",
+            "Spider-Spider",
+            "Sound-Sound",
+            "Phoenix-Phoenix",
+            "Pain-Pain",
+            "Blizzard-Blizzard",
+            "Gravity-Gravity",
+            "Mammoth-Mammoth",
+        },
 }
 
 local Players           = game:GetService("Players")
