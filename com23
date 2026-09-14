@@ -146,6 +146,9 @@ local COMPLETE_STALL = 3
 local BRING_TEST_INTERVAL = 0.4
 local BRING_MAX_FAILS     = 3
 
+local PHANTOM_TIME         = 5
+local PHANTOM_RELEASE_WAIT = 2
+
 local UW_X             = 50000
 local UW_ENTER         = Vector3.new(4050.31, -3, -1814.12)
 local UW_CITY_EXIT     = Vector3.new(61170.05, -3, 1952.83)
@@ -158,6 +161,9 @@ local UW_ARRIVE_RADIUS = 60
 local SEA2_MIN_LEVEL   = 700
 local SEA2_DOOR_CF     = CFrame.new(1288.73328, 35.8959961, -1361.06274, -0.70963943, 0, -0.704565167, 0, 1, 0, 0.704565167, 0, -0.70963943)
 local SEA3_MIN_LEVEL   = 1501
+
+local SEA3_FRUIT_HOP_DELAY   = 20
+local SEA3_FRUIT_PICK_RADIUS = 12
 
 local NO_BRING_MOBS = {
     ["Factory Staff"] = true,
@@ -1799,11 +1805,16 @@ local SEA2_STUCK_LIMIT = 20
 task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
-            if not _G.Level then Sea2Mode = false return end
+            if not _G.Level then
+                Sea2Mode = false
+                TravelActive = false
+                return
+            end
             local lvl = GetPlayerLevel() or 0
             if not World1 or lvl < SEA2_MIN_LEVEL then
                 Sea2Mode = false
                 Sea2Announced = false
+                TravelActive = false
                 return
             end
             if not CommF then
@@ -1940,6 +1951,7 @@ task.spawn(function()
                     end
                 else
                     Sea2StuckCount = 0
+                    TravelActive = false
                 end
 
             else
@@ -1959,6 +1971,7 @@ task.spawn(function()
                     end
                 else
                     Sea2StuckCount = 0
+                    TravelActive = false
                 end
 
                 local adm = GetConnectionEnemies("Ice Admiral")
@@ -2147,7 +2160,10 @@ task.spawn(function()
             ZouActive = false
             if not _G.Level then return end
             local lvl = GetPlayerLevel() or 0
-            if not (World2 and lvl >= SEA3_MIN_LEVEL) then return end
+            if not (World2 and lvl >= SEA3_MIN_LEVEL) then
+                ZouActive = false
+                return
+            end
             if not CommF then return end
             ZouActive = true
 
@@ -2277,6 +2293,8 @@ LocalPlayer.CharacterAdded:Connect(function()
     Sea2Mode = false
     Sea2StuckCount = 0
     Sea2Announced = false
+    TravelActive = false
+    ZouActive = false
     questCache, questCacheT = nil, 0
     zouCache.progress = -1
     zouCache.t = 0
