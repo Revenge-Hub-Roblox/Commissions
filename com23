@@ -1,0 +1,1950 @@
+--[[
+    OK Hub - Auto Quest Farm (Full + Damage-Confirmed Bring)
+    • ⚔ BRING ПОСЛЕ УРОНА: bring применяется ТОЛЬКО к мобам, которым мы уже
+      нанесли урон (сервер подтвердил прогрузку). Персонаж облетает каждого
+      квестового моба по очереди, и только после этого начинается стак.
+    • UNDERWATER ROUTE v3.1: Entrance (4050, -1.7, -1814) снаружи, Exit
+      (61170, -2, 1953) внутри. Подсветка с валидацией. Квест не берётся до входа.
+    • Движение: ровно 200 sps, ресинк без рывков, watchdog полёта
+    • Честная ротация ударов, детекция квеста: TrackedQuestFrame + анти-путаница
+    • On-join: Pirates, коды, BuyHaki, anti-afk, hop при админе
+    • В составе Auto Farm: Buso, Melee points, Travel Sea2 (700+), Sea3 (1500+)
+]]
+
+repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
+
+local Players           = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
+local VirtualUser       = game:GetService("VirtualUser")
+local HttpService       = game:GetService("HttpService")
+local TeleportService   = game:GetService("TeleportService")
+
+local LocalPlayer = Players.LocalPlayer
+local replicated  = ReplicatedStorage
+
+local World1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
+local World2 = game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
+local World3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
+
+getgenv()._G = getgenv()._G or {}
+_G.SelectWeapon = "Melee"
+_G.ChooseWP     = "Melee"
+_G.Level        = false
+_G.AutoFarmNear = false
+_G.AutoKillMob  = false
+_G.Auto_Melee   = true
+_B              = true
+
+local Sec         = 0.06
+local shouldTween = false
+local OnFarm      = false
+
+-- ═════════════════════════════════════════════════════════
+--  ANTICHEAT BYPASS + NOFALL
+-- ═════════════════════════════════════════════════════════
+
+pcall(function()
+    if replaceclosure and newcclosure and checkcaller and getinfo then
+        local old_coroutine_wrap
+        old_coroutine_wrap = replaceclosure(coroutine.wrap, newcclosure(function(func, ...)
+            if not checkcaller() then
+                local ok, caller_info = pcall(getinfo, 5, "f")
+                if ok and caller_info and caller_info.func == pcall then
+                    return coroutine.yield()
+                end
+            end
+            return old_coroutine_wrap(func, ...)
+        end))
+        print("[OK Hub] Anticheat bypass: on")
+    end
+end)
+
+pcall(function()
+    if hookmetamethod and checkcaller and getnamecallmethod then
+        local OldNameCall
+        OldNameCall = hookmetamethod(game, "__namecall", function(Self, ...)
+            local Args = {...}
+            local NamecallMethod = getnamecallmethod()
+            if not checkcaller() and NamecallMethod == "FireServer" then
+                if #Args == 2 and type(Args[1]) == "number" and Args[2] == false then
+                    return
+                end
+            end
+            return OldNameCall(Self, ...)
+        end)
+        print("[OK Hub] Nofall: on")
+    end
+end)
+
+-- ==================== НАСТРОЙКИ ====================
+local MOVE_SPEED = 200
+
+local QUEST_GRACE        = 12
+local QUEST_CONFIRM_WAIT = 6
+local GUI_LAG            = 1.5
+local SETTLE_RANGE       = 15
+
+-- watchdog полёта
+local WD_TICK        = 0.4
+local WD_ARRIVE_DIST = 30
+local WD_STUCK_DIST  = 1.5
+local WD_STUCK_TIME  = 1.2
+
+local COMPLETE_STALL = 3
+
+-- bring-верификация
+local BRING_TEST_INTERVAL = 0.4
+local BRING_MAX_FAILS     = 3
+
+-- 🔧 UNDERWATER CITY ROUTE (Sea 1 FishmanQuest)
+local UW_X             = 50000
+local UW_ENTER         = Vector3.new(4050.31, -3, -1814.12)   -- ВХОД (снаружи)
+local UW_CITY_EXIT     = Vector3.new(61170.05, -3, 1952.83)      -- ВЫХОД (внутри города)
+local UW_OUT           = Vector3.new(4050, 30, -1814)
+local UW_QUESTSPOT     = Vector3.new(61122, 25, 1569)
+local UW_REMOTE_EVERY  = 1.5
+local UW_MAX_TIME      = 60
+local UW_ARRIVE_RADIUS = 60
+
+local UWRouteBusy = false
+
+local QUEST_GIVERS = {
+    -- { NPC = "Bandit Quest Giver", Level = 1 },
+}
+
+-- ==================== СОСТОЯНИЕ ====================
+local QuestState = {
+    Mob       = nil,
+    Need      = nil,
+    LastSeen  = 0,
+    TakenAt   = 0,
+    LastTry   = 0,
+    Confirmed = false,
+    DeepFish  = nil,
+}
+local QuestKillCount     = 0
+local CompleteStallSince = nil
+local hooked             = {}
+local SelectMob          = nil
+local TravelActive       = false
+local ZouActive          = false
+
+-- ⚔ damage-confirmed bring
+local DamageConfirmed = {}  -- [model] = true → мобу нанесли урон, можно бринжать
+local BringFails      = {}
+local BringLastChk    = {}
+local BringStuck      = {}
+local NoBring         = {}
+local HitOrder        = {}
+
+local StatusLabel, lastStatus = nil, ""
+
+local function UpdateStatus(t)
+    if t == lastStatus then return end
+    lastStatus = t
+    print("[OK Hub] " .. t)
+    if StatusLabel then pcall(function() StatusLabel:SetText(t) end) end
+end
+
+local function CleanupMobTables(m)
+    DamageConfirmed[m] = nil
+    BringFails[m]      = nil
+    BringLastChk[m]    = nil
+    BringStuck[m]      = nil
+    NoBring[m]         = nil
+    HitOrder[m]        = nil
+end
+
+-- ==================== BLOCK + TWEEN ====================
+local block = Instance.new("Part")
+block.Name = "FarmBlock"
+block.Size = Vector3.new(2, 2, 2)
+block.Anchored = true
+block.CanCollide = false
+block.Transparency = 1
+block.Parent = workspace
+
+local activeTween, activeTarget = nil, nil
+
+local FOLLOW_DIST     = 25
+local RESYNC_DEBOUNCE = 0.15
+local lastResync      = 0
+
+task.spawn(function()
+    repeat task.wait() until LocalPlayer.Character and LocalPlayer.Character.PrimaryPart
+    block.CFrame = LocalPlayer.Character.PrimaryPart.CFrame
+    while true do
+        task.wait()
+        pcall(function()
+            if OnFarm and block.Parent then
+                local root = LocalPlayer.Character and LocalPlayer.Character.PrimaryPart
+                if root then
+                    local d = (root.Position - block.Position).Magnitude
+                    if d <= FOLLOW_DIST then
+                        root.CFrame = block.CFrame
+                    elseif d <= 400 then
+                        local now = tick()
+                        if now - lastResync >= RESYNC_DEBOUNCE then
+                            lastResync = now
+                            if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+                                activeTween:Cancel()
+                            end
+                            block.CFrame = root.CFrame
+                            if activeTarget then
+                                _tp(activeTarget, true)
+                            end
+                        end
+                    else
+                        block.CFrame = root.CFrame
+                    end
+                end
+                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then part.CanCollide = false end
+                end
+            end
+        end)
+    end
+end)
+
+task.spawn(function()
+    while task.wait() do
+        pcall(function()
+            local farming = _G.Level or _G.AutoFarmNear or _G.AutoKillMob
+            OnFarm = farming
+            shouldTween = farming
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if farming and hrp then
+                if not hrp:FindFirstChild("BodyClip") then
+                    local bv = Instance.new("BodyVelocity")
+                    bv.Name = "BodyClip"
+                    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+                    bv.Velocity = Vector3.zero
+                    bv.Parent = hrp
+                end
+            elseif hrp then
+                local clip = hrp:FindFirstChild("BodyClip")
+                if clip then clip:Destroy() end
+            end
+        end)
+    end
+end)
+
+-- ровно MOVE_SPEED на любой дистанции
+_tp = function(cf, force)
+    if typeof(cf) == "Vector3" then cf = CFrame.new(cf) end
+    if typeof(cf) ~= "CFrame" then return end
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    if not force and activeTween
+        and activeTween.PlaybackState == Enum.PlaybackState.Playing
+        and activeTarget and (activeTarget.Position - cf.Position).Magnitude < 2 then
+        return
+    end
+
+    if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+        activeTween:Cancel()
+    end
+
+    block.CFrame = root.CFrame
+
+    local dist = (cf.Position - block.Position).Magnitude
+    local time = math.max(dist / MOVE_SPEED, 0.05)
+
+    activeTarget = cf
+    local tw = TweenService:Create(block, TweenInfo.new(time, Enum.EasingStyle.Linear), { CFrame = cf })
+    activeTween = tw
+    tw:Play()
+    task.spawn(function()
+        while tw and tw.PlaybackState == Enum.PlaybackState.Playing do
+            if not shouldTween then tw:Cancel() break end
+            task.wait()
+        end
+    end)
+end
+
+-- WATCHDOG полёта
+local wdLastBlockPos, wdStuckTime = nil, 0
+
+task.spawn(function()
+    while task.wait(WD_TICK) do
+        if not OnFarm then
+            wdLastBlockPos, wdStuckTime = nil, 0
+            continue
+        end
+
+        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not root or not activeTarget then
+            wdLastBlockPos, wdStuckTime = nil, 0
+            continue
+        end
+
+        if (root.Position - activeTarget.Position).Magnitude <= WD_ARRIVE_DIST then
+            wdLastBlockPos, wdStuckTime = nil, 0
+            continue
+        end
+
+        local playing = activeTween ~= nil
+            and activeTween.PlaybackState == Enum.PlaybackState.Playing
+
+        if not playing then
+            pcall(function() _tp(activeTarget) end)
+            wdLastBlockPos, wdStuckTime = nil, 0
+        else
+            local bp = block.Position
+            if wdLastBlockPos and (bp - wdLastBlockPos).Magnitude < WD_STUCK_DIST then
+                wdStuckTime += WD_TICK
+                if wdStuckTime >= WD_STUCK_TIME then
+                    pcall(function() _tp(activeTarget, true) end)
+                    wdStuckTime = 0
+                end
+            else
+                wdStuckTime = 0
+            end
+            wdLastBlockPos = bp
+        end
+    end
+end)
+
+notween = function(cf)
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root and cf then
+        pcall(function() root.CFrame = cf end)
+    end
+end
+
+-- ==================== WEAPON ====================
+local function EquipWeapon(name)
+    if not name then return end
+    local tool = LocalPlayer.Backpack:FindFirstChild(name) or LocalPlayer.Character:FindFirstChild(name)
+    if tool then
+        pcall(function() LocalPlayer.Character.Humanoid:EquipTool(tool) end)
+    end
+end
+
+task.spawn(function()
+    while task.wait(0.3) do
+        pcall(function()
+            for _, v in pairs(LocalPlayer.Backpack:GetChildren()) do
+                if v:IsA("Tool") and v.ToolTip == _G.ChooseWP then
+                    _G.SelectWeapon = v.Name
+                    break
+                end
+            end
+        end)
+    end
+end)
+
+-- ==================== BRING (только damage-confirmed) ====================
+
+task.spawn(function()
+    if not sethiddenproperty then
+        warn("[OK Hub] sethiddenproperty недоступен — bring будет частичным")
+        return
+    end
+    RunService.Stepped:Connect(function()
+        if not OnFarm then return end
+        pcall(function()
+            sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", 9e9)
+            sethiddenproperty(LocalPlayer, "SimulationRadius", 9e9)
+        end)
+    end)
+end)
+
+local function ReleaseMob(v, hum, root)
+    NoBring[v] = true
+    BringStuck[v] = true
+    pcall(function()
+        local bv = root:FindFirstChild("BodyVelocity")
+        if bv then bv:Destroy() end
+        if hum then
+            hum.WalkSpeed = 16
+            hum.JumpPower = 50
+        end
+        root.CanCollide = true
+    end)
+end
+
+-- ⚔ в стак идут ТОЛЬКО мобы, которым мы уже нанесли урон
+local function BringEnemy(Mon)
+    if not _B or not Mon or not Mon:FindFirstChild("HumanoidRootPart") then return end
+    pcall(function()
+        if sethiddenproperty then
+            sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", 9e9)
+            sethiddenproperty(LocalPlayer, "SimulationRadius", 9e9)
+        end
+
+        local targetPos = Mon.HumanoidRootPart.Position
+        local enemies = workspace:FindFirstChild("Enemies")
+        if not enemies then return end
+
+        for _, v in pairs(enemies:GetChildren()) do
+            if v ~= Mon and v.Name == Mon.Name
+                and not NoBring[v] and DamageConfirmed[v] then   -- ⚔ только урон получившие
+                local hum  = v:FindFirstChildOfClass("Humanoid")
+                local root = v:FindFirstChild("HumanoidRootPart")
+                if hum and root and hum.Health > 0 then
+                    local dist = (root.Position - targetPos).Magnitude
+                    if dist <= 5000 then
+                        if dist > 15 then
+                            root.CFrame = CFrame.new(targetPos)
+                            root.AssemblyLinearVelocity = Vector3.zero
+                            root.AssemblyAngularVelocity = Vector3.zero
+
+                            local now = tick()
+                            if now - (BringLastChk[v] or 0) >= BRING_TEST_INTERVAL then
+                                BringLastChk[v] = now
+                                local fails = (BringFails[v] or 0) + 1
+                                BringFails[v] = fails
+                                if fails >= BRING_MAX_FAILS then
+                                    ReleaseMob(v, hum, root)
+                                end
+                            end
+                        else
+                            BringFails[v]   = nil
+                            BringLastChk[v] = nil
+                            BringStuck[v]   = nil
+                        end
+
+                        root.CanCollide = false
+                        hum.WalkSpeed = 0
+                        hum.JumpPower = 0
+                    end
+                end
+            end
+        end
+
+        Mon.HumanoidRootPart.CanCollide = false
+        Mon.Humanoid.WalkSpeed = 0
+        Mon.Humanoid.JumpPower = 0
+    end)
+end
+
+-- ==================== ATTACK ====================
+local Attack = {}
+
+Attack.Alive = function(m)
+    return m and m.Parent and m:FindFirstChild("Humanoid") and m.Humanoid.Health > 0
+end
+
+Attack.Kill = function(model, active)
+    if not active or not Attack.Alive(model) then return end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- ⚔ bring тянется только к уже обстрелянным (подтверждённым уроном) мобам
+    BringEnemy(model)
+
+    EquipWeapon(_G.SelectWeapon)
+    local tip = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    local isFruit = tip and tip.ToolTip == "Blox Fruit"
+
+    local targetCF = hrp.CFrame * CFrame.new(0, isFruit and 10 or 24, 0)
+
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root
+        and (root.Position - targetCF.Position).Magnitude <= 6
+        and (block.Position - targetCF.Position).Magnitude <= 6 then
+        return
+    end
+
+    _tp(targetCF)
+end
+
+-- ⚔️ КЛИКЕР + RegisterHit (честная ротация + подтверждение урона)
+local ATTACK_CHUNK = 2
+local MAX_PAIRS    = 5
+local CHUNK_DELAY  = 0.03
+local PLAYER_RANGE = 60
+
+task.spawn(function()
+    while task.wait(0.03) do
+        if not (_G.Level or _G.AutoFarmNear or _G.AutoKillMob) then continue end
+
+        pcall(function()
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+
+            if (root.Position - block.Position).Magnitude > SETTLE_RANGE then
+                return
+            end
+
+            local enemies = workspace:FindFirstChild("Enemies")
+            if not enemies then return end
+
+            local closest, closestDist = nil, 80
+            local fbClosest, fbDist = nil, 80
+            for _, v in ipairs(enemies:GetChildren()) do
+                if Attack.Alive(v) and v:FindFirstChild("HumanoidRootPart") then
+                    local dist = (v.HumanoidRootPart.Position - root.Position).Magnitude
+                    if dist < closestDist and not BringStuck[v] then
+                        closestDist = dist
+                        closest = v
+                    end
+                    if dist < fbDist then
+                        fbDist = dist
+                        fbClosest = v
+                    end
+                end
+            end
+            closest = closest or fbClosest
+            if not closest then return end
+
+            local anchorPos = closest.HumanoidRootPart.Position
+
+            local pool = {}
+            for _, v in ipairs(enemies:GetChildren()) do
+                if Attack.Alive(v) and v:FindFirstChild("HumanoidRootPart") then
+                    local dStack  = (v.HumanoidRootPart.Position - anchorPos).Magnitude
+                    local dPlayer = (v.HumanoidRootPart.Position - root.Position).Magnitude
+                    if dStack <= 100 and dPlayer <= PLAYER_RANGE then
+                        table.insert(pool, { mob = v, dist = dPlayer, hit = HitOrder[v] or 0 })
+                    end
+                end
+            end
+            if #pool == 0 then
+                pool[1] = { mob = closest, dist = closestDist, hit = 0 }
+            end
+
+            table.sort(pool, function(a, b)
+                if a.hit ~= b.hit then return a.hit < b.hit end
+                return a.dist < b.dist
+            end)
+
+            EquipWeapon(_G.SelectWeapon)
+
+            VirtualUser:CaptureController()
+            VirtualUser:Button1Down(Vector2.new(0, 0))
+            task.wait(0.012)
+            VirtualUser:Button1Up(Vector2.new(0, 0))
+
+            local net = replicated:FindFirstChild("Modules") and replicated.Modules:FindFirstChild("Net")
+            if net then
+                local attackRE = net:FindFirstChild("RE/RegisterAttack")
+                local hitRE    = net:FindFirstChild("RE/RegisterHit")
+                if attackRE and hitRE then
+                    local i, pairsSent = 1, 0
+                    while i <= #pool and pairsSent < MAX_PAIRS do
+                        local chunk = {}
+                        for j = i, math.min(i + ATTACK_CHUNK - 1, #pool) do
+                            local m = pool[j].mob
+                            table.insert(chunk, { m, m.HumanoidRootPart })
+                            HitOrder[m] = tick()
+                        end
+                        attackRE:FireServer(0.3)
+                        hitRE:FireServer(chunk[1][2], chunk)
+                        pairsSent += 1
+                        i += ATTACK_CHUNK
+                        if i <= #pool and pairsSent < MAX_PAIRS then
+                            task.wait(CHUNK_DELAY)
+                        end
+                    end
+                end
+            end
+
+            -- ⚔ ПОДТВЕРЖДЕНИЕ УРОНА: HP изменилось у моба из чанка → он прогружен,
+            -- сервер его видит → с этого момента его можно бринжать
+            for _, v in ipairs(pool) do
+                local hum = v.mob:FindFirstChildOfClass("Humanoid")
+                if hum and not DamageConfirmed[v.mob] then
+                    local rec = DamageConfirmed.HP and nil or nil
+                    -- первый раз запоминаем HP
+                    local hp0 = DamageConfirmed["hp_" .. tostring(v.mob)]
+                    if hp0 == nil then
+                        DamageConfirmed["hp_" .. tostring(v.mob)] = hum.Health
+                    elseif math.abs(hum.Health - hp0) > 0.5 then
+                        DamageConfirmed[v.mob] = true
+                        DamageConfirmed["hp_" .. tostring(v.mob)] = nil
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- ==================== ДЕТЕКЦИЯ КВЕСТА ====================
+local function GetCurrentQuest()
+    local ok, res = pcall(function()
+        local tracked = LocalPlayer.PlayerGui:FindFirstChild("TrackedQuestFrame")
+        if not tracked then return nil end
+        local frame = tracked:FindFirstChild("Frame")
+        if not frame then return nil end
+        local header = frame:FindFirstChild("header")
+        local title = header and header:FindFirstChild("textLabel")
+        local description = frame:FindFirstChild("description")
+        local progress = frame:FindFirstChild("progress")
+        if not title or not title:IsA("TextLabel") then return nil end
+        local name = title.Text
+        if name == "" or name == "---" then return nil end
+        return {
+            Name     = name,
+            Target   = (description and description:IsA("TextLabel")) and description.Text or "",
+            Progress = (progress and progress:IsA("TextLabel")) and progress.Text or "",
+        }
+    end)
+    if ok then return res end
+    return nil
+end
+
+local function ParseProgress(str)
+    local a, b = (str or ""):match("(%d+)%s*/%s*(%d+)")
+    if a and b then return tonumber(a), tonumber(b) end
+    return nil, nil
+end
+
+-- ==================== ТЕКСТ И ИМЕНА ====================
+local function Norm(s)
+    s = (s or ""):lower():gsub("[^%w%s]", " ")
+    return (s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function TextHas(text, word)
+    text, word = Norm(text), Norm(word)
+    if text == "" or word == "" then return false end
+    return text:find(word, 1, true) ~= nil
+end
+
+local function CleanName(s)
+    s = (s or ""):gsub("%b[]", " "):gsub("%d+", " "):gsub("[^%w%s]", " ")
+    return Norm(s)
+end
+
+local function SameMob(enemyName, target)
+    if not enemyName or not target then return false end
+    if enemyName == target then return true end
+    local a, b = CleanName(enemyName), CleanName(target)
+    if a ~= "" and a == b then return true end
+    local sa = Norm(a:gsub("boss", " "))
+    local sb = Norm(b:gsub("boss", " "))
+    return sa ~= "" and sa == sb
+end
+
+-- ==================== УРОВЕНЬ ====================
+local function GetPlayerLevel()
+    local ok, lvl = pcall(function()
+        local d = LocalPlayer:FindFirstChild("Data")
+        local v = d and d:FindFirstChild("Level")
+        if v then return v.Value end
+        local ls = LocalPlayer:FindFirstChild("leaderstats")
+        if ls then
+            for _, n in ipairs({ "Level", "level", "Lvl" }) do
+                local v2 = ls:FindFirstChild(n)
+                if v2 then return v2.Value end
+            end
+        end
+        return nil
+    end)
+    if ok then return lvl end
+    return nil
+end
+
+-- ==================== МОДУЛИ / REMOTES ====================
+local QuestModule, GuideModule, CommF
+task.spawn(function()
+    pcall(function() QuestModule = require(replicated:WaitForChild("Quests", 15)) end)
+    pcall(function() GuideModule = require(replicated:WaitForChild("GuideModule", 15)) end)
+    pcall(function() CommF = replicated:WaitForChild("Remotes", 15):WaitForChild("CommF_", 15) end)
+end)
+
+local blacklist = { "MarineQuest", "BartiloQuest", "CitizenQuest", "Trainees" }
+
+-- ==================== ПОЛНЫЙ ПУЛ ИМЁН ====================
+local AllMobNames = {}
+local ModulePoolLoaded = false
+
+local function RebuildMobPool()
+    if type(QuestModule) == "table" and not ModulePoolLoaded then
+        for _, qData in pairs(QuestModule) do
+            if type(qData) == "table" then
+                for _, d in pairs(qData) do
+                    if type(d) == "table" and type(d.Task) == "table" then
+                        for mob in pairs(d.Task) do
+                            if type(mob) == "string" and mob ~= "" then
+                                AllMobNames[mob] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if next(AllMobNames) then ModulePoolLoaded = true end
+    end
+    local enemies = workspace:FindFirstChild("Enemies")
+    if enemies then
+        for _, v in ipairs(enemies:GetChildren()) do
+            if v:IsA("Model") and v.Name ~= "" then
+                AllMobNames[v.Name] = true
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(5) do
+        pcall(RebuildMobPool)
+        pcall(function()
+            for m in pairs(BringFails) do
+                if not m.Parent then CleanupMobTables(m) end
+            end
+            for m in pairs(HitOrder) do
+                if not m.Parent then HitOrder[m] = nil end
+            end
+            for m in pairs(DamageConfirmed) do
+                if typeof(m) == "Instance" and not m.Parent then
+                    DamageConfirmed[m] = nil
+                end
+            end
+        end)
+    end
+end)
+
+-- ==================== ВЫБОР КВЕСТА ====================
+local function GetBestQuest()
+    local lvl = GetPlayerLevel() or 0
+
+    if lvl >= 700 and World1 then
+        return { Mob = "Galley Captain", NameQuest = "FountainQuest", ID = 2, LevelReq = 700 }
+    end
+    if lvl >= 1500 and World2 then
+        return { Mob = "Water Fighter", NameQuest = "ForgottenQuest", ID = 2, LevelReq = 1450 }
+    end
+
+    if QuestModule and type(QuestModule) == "table" then
+        local best = { LevelReq = -1 }
+        for qName, qData in pairs(QuestModule) do
+            if type(qData) == "table" and not table.find(blacklist, qName) then
+                for id, d in pairs(qData) do
+                    if type(d) == "table" and type(d.LevelReq) == "number" and type(d.Task) == "table" then
+                        for mob, count in pairs(d.Task) do
+                            if type(mob) == "string" and type(count) == "number"
+                                and count > 1 and lvl >= d.LevelReq then
+                                local better = d.LevelReq > best.LevelReq
+                                    or (d.LevelReq == best.LevelReq and tostring(qName) < tostring(best.NameQuest))
+                                if better then
+                                    best = { Mob = mob, NameQuest = qName, ID = id, LevelReq = d.LevelReq, Count = count }
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if best.Mob then return best end
+    end
+
+    local best
+    for _, q in ipairs(QUEST_GIVERS) do
+        if lvl >= (q.Level or 0) and (not best or (q.Level or 0) > (best.Level or 0)) then
+            best = q
+        end
+    end
+    return best
+end
+
+-- ═════════════════════════════════════════════════════════
+--  🔧 UNDERWATER CITY ROUTE v3.1
+-- ═════════════════════════════════════════════════════════
+
+local function InUnderwater()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    return root ~= nil and root.Position.X > UW_X
+end
+
+local function IsDeepFishmanQuest(best)
+    if not World1 or not best then return false end
+    if best.NameQuest == "FishmanQuest" then return true end
+    return TextHas(best.Mob or "", "Fishman")
+end
+
+local function ReqEnter(vec)
+    if CommF then
+        pcall(function() CommF:InvokeServer("requestEntrance", vec) end)
+    end
+end
+
+-- 🔍 подсветка Entrance
+local EntHighlight, EntBillboard = nil, nil
+local function SetupEntranceVisual()
+    if EntHighlight and EntHighlight.Parent then return end
+    pcall(function()
+        local map = workspace:FindFirstChild("Map")
+        local cavern = map and map:FindFirstChild("Fishmen")
+            and map.Fishmen:FindFirstChild("FishmanCavern")
+        local ent = cavern and cavern:FindFirstChild("Entrance")
+        if not ent then
+            ent = workspace:FindFirstChild("Entrance", true)
+        end
+        if not ent then
+            warn("[OK Hub] ❌ Entrance не найден — маршрут по координатам")
+            return
+        end
+
+        local base = ent:IsA("BasePart") and ent
+            or ent.PrimaryPart or ent:FindFirstChildWhichIsA("BasePart")
+        if not base then return end
+
+        if base.Position.X > UW_X then
+            warn("[OK Hub] ⚠ Парт Entrance внутри города — не вход, использую координаты")
+            return
+        end
+
+        print("[OK Hub] ✅ Entrance найден: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
+
+        EntHighlight = Instance.new("Highlight")
+        EntHighlight.Name = "OKHub_EntranceHL"
+        EntHighlight.FillColor = Color3.fromRGB(255, 100, 0)
+        EntHighlight.OutlineColor = Color3.fromRGB(255, 255, 0)
+        EntHighlight.FillTransparency = 0.6
+        EntHighlight.OutlineTransparency = 0
+        EntHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        EntHighlight.Adornee = base
+        EntHighlight.Parent = base
+
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "OKHub_EntranceBB"
+        bb.Size = UDim2.new(0, 220, 0, 60)
+        bb.StudsOffset = Vector3.new(0, 6, 0)
+        bb.AlwaysOnTop = true
+        bb.Adornee = base
+        bb.Parent = base
+
+        local tl = Instance.new("TextLabel")
+        tl.Size = UDim2.new(1, 0, 1, 0)
+        tl.BackgroundTransparency = 1
+        tl.TextColor3 = Color3.fromRGB(255, 255, 0)
+        tl.TextStrokeTransparency = 0
+        tl.TextScaled = true
+        tl.Font = Enum.Font.GothamBold
+        tl.Text = "⬇ ENTRANCE (fishman)"
+        tl.Parent = bb
+
+        EntBillboard = bb
+    end)
+end
+task.spawn(function()
+    task.wait(3)
+    while task.wait(5) do SetupEntranceVisual() end
+end)
+
+local function AtEntrance()
+    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    if InUnderwater() then return true end
+    return (root.Position - UW_ENTER).Magnitude <= UW_ARRIVE_RADIUS
+end
+
+local function EnterUnderwaterCity()
+    if InUnderwater() then return true end
+    if not _G.Level then return false end
+    if UWRouteBusy then return false end
+
+    UWRouteBusy = true
+    local ok = false
+
+    local targetCF = CFrame.new(UW_ENTER + Vector3.new(0, 4, 0))
+    UpdateStatus("🕳 Fishman: лечу к каверне (Entrance)...")
+    _tp(targetCF)
+
+    local lastFire = 0
+    local deadline = tick() + UW_MAX_TIME
+    while tick() < deadline do
+        if not _G.Level then break end
+
+        if InUnderwater() then
+            ok = true
+            UpdateStatus("🕳 Fishman: мы в подводном городе")
+            break
+        end
+
+        if AtEntrance() and tick() - lastFire >= UW_REMOTE_EVERY then
+            lastFire = tick()
+            ReqEnter(UW_ENTER)
+        end
+
+        if activeTarget and (activeTarget.Position - targetCF.Position).Magnitude > 30 then
+            _tp(targetCF, true)
+        end
+
+        task.wait(0.2)
+    end
+
+    if not ok then
+        UpdateStatus("🕳 Fishman: last-resort TP в город")
+        notween(CFrame.new(UW_QUESTSPOT))
+        task.wait(0.4)
+        ok = InUnderwater()
+    end
+
+    UWRouteBusy = false
+    return ok
+end
+
+local function ExitUnderwaterCity()
+    if not InUnderwater() then return true end
+    if not _G.Level then return false end
+    if UWRouteBusy then return false end
+
+    UWRouteBusy = true
+    local ok = false
+
+    local exitPos = UW_CITY_EXIT
+    pcall(function()
+        local ex = workspace:FindFirstChild("TeleportSpawn", true)
+            or (workspace.Map and workspace.Map:FindFirstChild("Exit", true))
+        if ex and ex:IsA("BasePart") then
+            exitPos = ex.Position
+            print("[OK Hub] ✅ Exit найден: " .. ex:GetFullName() .. " @ " .. tostring(ex.Position))
+        end
+    end)
+
+    local targetCF = CFrame.new(exitPos + Vector3.new(0, 4, 0))
+    UpdateStatus("🕳 Fishman: выход из города...")
+    _tp(targetCF)
+
+    local lastFire = 0
+    local deadline = tick() + UW_MAX_TIME
+    while tick() < deadline do
+        if not _G.Level then break end
+
+        if not InUnderwater() then
+            ok = true
+            UpdateStatus("🕳 Fishman: вышли, обычный маршрут")
+            break
+        end
+
+        if tick() - lastFire >= UW_REMOTE_EVERY then
+            lastFire = tick()
+            ReqEnter(exitPos)
+        end
+
+        if activeTarget and (activeTarget.Position - targetCF.Position).Magnitude > 30 then
+            _tp(targetCF, true)
+        end
+
+        task.wait(0.2)
+    end
+
+    if not ok then
+        UpdateStatus("🕳 Fishman: last-resort TP наружу")
+        notween(CFrame.new(UW_OUT))
+        task.wait(0.4)
+        ok = not InUnderwater()
+    end
+
+    UWRouteBusy = false
+    return ok
+end
+
+-- ==================== ВЗЯТИЕ КВЕСТА ====================
+local function FindNPCModel(name)
+    if not name or name == "" then return nil, nil end
+    local npc = workspace:FindFirstChild(name, true)
+    if not npc then return nil, nil end
+    if npc:IsA("Model") then
+        return npc, npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart")
+    elseif npc:IsA("BasePart") then
+        return nil, npc
+    end
+    return nil, nil
+end
+
+local function FireNPC(npcModel)
+    if not npcModel then return false end
+    local prompt = npcModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        local ok = pcall(function() fireproximityprompt(prompt) end)
+        if not ok then
+            pcall(function()
+                prompt:InputHoldBegin()
+                task.wait(0.15)
+                prompt:InputHoldEnd()
+            end)
+        end
+        return true
+    end
+    local click = npcModel:FindFirstChildWhichIsA("ClickDetector", true)
+    if click then
+        pcall(function() fireclickdetector(click) end)
+        return true
+    end
+    return false
+end
+
+local function ApproachNPC(npcRoot, timeout)
+    _tp(npcRoot.CFrame * CFrame.new(0, 0, -3.5))
+
+    local deadline = tick() + (timeout or 8)
+    while tick() < deadline do
+        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not root or not _G.Level then return false end
+        if (root.Position - npcRoot.Position).Magnitude <= 8 then
+            return true
+        end
+        task.wait(0.1)
+    end
+    return false
+end
+
+local function TeleportToQuestNPC(best, timeout)
+    timeout = timeout or 8
+
+    if IsDeepFishmanQuest(best) then
+        if not EnterUnderwaterCity() then
+            return false, "no_entry"
+        end
+    elseif InUnderwater() then
+        ExitUnderwaterCity()
+    end
+
+    local npcModel, npcRoot
+    if GuideModule and GuideModule.Data and GuideModule.Data.LastClosestNPC then
+        npcModel, npcRoot = FindNPCModel(GuideModule.Data.LastClosestNPC)
+    end
+    if not npcRoot and best and best.NPC then
+        npcModel, npcRoot = FindNPCModel(best.NPC)
+    end
+
+    if not npcRoot then
+        return true
+    end
+
+    return ApproachNPC(npcRoot, timeout)
+end
+
+local function TryStartQuest(best)
+    if CommF and best.NameQuest then
+        pcall(function() CommF:InvokeServer("StartQuest", best.NameQuest, best.ID) end)
+    else
+        local npcModel, npcRoot
+        if best and best.NPC then
+            npcModel, npcRoot = FindNPCModel(best.NPC)
+        end
+        if npcRoot then
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - npcRoot.Position).Magnitude > 8 then
+                ApproachNPC(npcRoot, 4)
+            end
+            FireNPC(npcModel)
+            task.wait(0.4)
+            FireNPC(npcModel)
+        end
+    end
+
+    local deadline = tick() + QUEST_CONFIRM_WAIT
+    while tick() < deadline do
+        local q = GetCurrentQuest()
+        if q then return q end
+        if not _G.Level then return nil end
+        task.wait(0.15)
+    end
+    return nil
+end
+
+-- ==================== ПАРСИНГ МОБА ====================
+local QuestMobCache = {}
+
+local function GetQuestMob(quest)
+    local text = Norm((quest.Name or "") .. " " .. (quest.Target or ""))
+    if text == "" then return nil end
+
+    local c = QuestMobCache[text]
+    if c then
+        if c.mob and (ModulePoolLoaded or tick() - c.t < 6) then
+            return c.mob
+        end
+        if not c.mob and tick() - c.t < 1.5 then
+            return nil
+        end
+    end
+
+    local best, bestLen = nil, 0
+    for name in pairs(AllMobNames) do
+        if TextHas(text, name) and #name > bestLen then
+            best, bestLen = name, #name
+        end
+    end
+    QuestMobCache[text] = { mob = best, t = tick() }
+    return best
+end
+
+-- ==================== ФАРМ МОБОВ КВЕСТА ====================
+local SpawnFolder
+pcall(function()
+    local wo = workspace:FindFirstChild("_WorldOrigin")
+    SpawnFolder = wo and wo:FindFirstChild("EnemySpawns")
+end)
+
+local function FindSpawnFor(mob)
+    if not SpawnFolder then return nil end
+    for _, sp in ipairs(SpawnFolder:GetChildren()) do
+        if sp:IsA("BasePart") and SameMob(sp.Name, mob) then
+            return sp
+        end
+    end
+    return nil
+end
+
+local function FindMob(mob)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return nil end
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local best, bd
+    for _, v in ipairs(enemies:GetChildren()) do
+        local hum, hrp = v:FindFirstChildOfClass("Humanoid"), v:FindFirstChild("HumanoidRootPart")
+        if hum and hrp and hum.Health > 0 and SameMob(v.Name, mob) then
+            local d = myRoot and (hrp.Position - myRoot.Position).Magnitude or math.huge
+            if not bd or d < bd then best, bd = v, d end
+        end
+    end
+    return best
+end
+
+-- ⚔ ближайший НЕ подтверждённый уроном квестовый моб (облетаем по одному)
+local function FindUnconfirmedMob(mob)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return nil end
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local best, bd
+    for _, v in ipairs(enemies:GetChildren()) do
+        local hum, hrp = v:FindFirstChildOfClass("Humanoid"), v:FindFirstChild("HumanoidRootPart")
+        if hum and hrp and hum.Health > 0 and SameMob(v.Name, mob) and not DamageConfirmed[v] then
+            local d = myRoot and (hrp.Position - myRoot.Position).Magnitude or math.huge
+            if not bd or d < bd then best, bd = v, d end
+        end
+    end
+    return best
+end
+
+local function FarmQuestMob(mob)
+    if UWRouteBusy then return end
+
+    local deep = (QuestState.DeepFish == true)
+        or (World1 and TextHas(mob or "", "Fishman") or false)
+
+    if deep and not InUnderwater() then
+        if not EnterUnderwaterCity() then return end
+    elseif not deep and InUnderwater() then
+        if not ExitUnderwaterCity() then return end
+    end
+
+    -- ⚔ фаза 1: облетаем неподтверждённых (bring их не трогает)
+    local unconf = FindUnconfirmedMob(mob)
+    if unconf then
+        Attack.Kill(unconf, true)
+        return
+    end
+
+    -- ⚔ фаза 2: все подтверждены → обычный фарм со стаком
+    local target = FindMob(mob)
+    if target then
+        Attack.Kill(target, true)
+    else
+        local sp = FindSpawnFor(mob)
+        if sp then
+            _tp(sp.CFrame * CFrame.new(0, 25, 0))
+        end
+    end
+end
+
+local function GetConnectionEnemies(name)
+    local en = workspace:FindFirstChild("Enemies")
+    if en then
+        for _, v in pairs(en:GetChildren()) do
+            if v.Name == name and Attack.Alive(v) then
+                return v
+            end
+        end
+    end
+    local rs = replicated:FindFirstChild("Enemies")
+    if rs then
+        for _, v in pairs(rs:GetChildren()) do
+            if v.Name == name then
+                return v
+            end
+        end
+    end
+    return nil
+end
+
+local function HookMobs(mob)
+    if not mob then return end
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies then return end
+    for _, v in ipairs(enemies:GetChildren()) do
+        if SameMob(v.Name, mob) and not hooked[v] then
+            hooked[v] = true
+            local h = v:FindFirstChildOfClass("Humanoid")
+            if h then
+                local conn
+                conn = h.Died:Connect(function()
+                    conn:Disconnect()
+                    if QuestState.Mob and SameMob(mob, QuestState.Mob) then
+                        QuestKillCount += 1
+                    end
+                end)
+            end
+            v.Destroying:Connect(function()
+                hooked[v] = nil
+                CleanupMobTables(v)
+            end)
+        end
+    end
+end
+
+local function ResetQuestState()
+    QuestState.Confirmed = false
+    QuestState.Mob, QuestState.Need = nil, nil
+    QuestState.DeepFish = nil
+    QuestState.TakenAt = 0
+    QuestKillCount = 0
+    CompleteStallSince = nil
+end
+
+-- ==================== ГЛАВНЫЙ ЦИКЛ ====================
+local function QuestFarmStep()
+    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+
+    if TravelActive or ZouActive then return end
+
+    local now = tick()
+    local quest = GetCurrentQuest()
+
+    if quest then
+        QuestState.LastSeen = now
+        QuestState.Confirmed = true
+
+        local a, b = ParseProgress(quest.Progress)
+        if a and b and b > 0 and a >= b then
+            CompleteStallSince = CompleteStallSince or now
+            if now - CompleteStallSince >= COMPLETE_STALL then
+                UpdateStatus("🏆 Квест завершён (трекер не очистился) — беру следующий")
+                pcall(function() CommF:InvokeServer("AbandonQuest") end)
+                ResetQuestState()
+                QuestState.LastTry = 0
+            end
+            return
+        end
+        CompleteStallSince = nil
+
+        local parsed = GetQuestMob(quest)
+
+        if not QuestState.Mob and parsed then
+            QuestState.Mob = parsed
+            if QuestState.DeepFish == nil and parsed then
+                QuestState.DeepFish = World1 and TextHas(parsed, "Fishman") or false
+            end
+        end
+
+        if ModulePoolLoaded and QuestState.Mob and parsed and not SameMob(parsed, QuestState.Mob) then
+            UpdateStatus("⚠ Чужой квест (" .. parsed .. " ≠ " .. QuestState.Mob .. ") — бросаю")
+            pcall(function() CommF:InvokeServer("AbandonQuest") end)
+            ResetQuestState()
+            QuestState.LastTry = 0
+            return
+        end
+
+        local mob = QuestState.Mob or parsed
+        if mob then
+            QuestState.Mob = mob
+            HookMobs(mob)
+            UpdateStatus(("⚔ %s | моб: %s | %s"):format(quest.Name, mob, quest.Progress ~= "" and quest.Progress or "..."))
+            FarmQuestMob(mob)
+        else
+            UpdateStatus("🔎 Определяю моба из квеста: " .. quest.Name)
+            RebuildMobPool()
+        end
+        return
+    end
+
+    local sinceSeen = now - QuestState.LastSeen
+
+    if QuestState.Confirmed then
+        if sinceSeen < GUI_LAG then
+            if QuestState.Mob and not UWRouteBusy then FarmQuestMob(QuestState.Mob) end
+            return
+        end
+        ResetQuestState()
+        UpdateStatus("✅ Квест выполнен — ищу следующий")
+        return
+    end
+
+    if QuestState.Need and QuestKillCount >= QuestState.Need then
+        ResetQuestState()
+        UpdateStatus("✅ Квест выполнен (счётчик убийств)")
+        return
+    end
+
+    if now - QuestState.TakenAt < QUEST_GRACE then
+        if QuestState.Mob and not UWRouteBusy then FarmQuestMob(QuestState.Mob) end
+        return
+    end
+
+    if now - QuestState.LastTry < 2 then return end
+    QuestState.LastTry = now
+
+    local best = GetBestQuest()
+    if not best then
+        UpdateStatus("⛔ Нет подходящего квеста (lvl " .. tostring(GetPlayerLevel() or "?") .. ")")
+        return
+    end
+
+    UpdateStatus("📝 Иду за квестом: " .. tostring(best.NameQuest or best.NPC) .. " | моб: " .. tostring(best.Mob or "?"))
+
+    local arrived, routeErr = TeleportToQuestNPC(best, 8)
+    if not _G.Level then return end
+
+    if routeErr == "no_entry" then
+        UpdateStatus("⏳ Не вошёл в каверну — ретрай через 2с")
+        return
+    end
+
+    QuestState.TakenAt = tick()
+    local taken = TryStartQuest(best)
+
+    if taken then
+        local parsed = GetQuestMob(taken)
+        if best.Mob and parsed and not SameMob(parsed, best.Mob) then
+            UpdateStatus("⚠ Взят не тот квест (" .. parsed .. " вместо " .. best.Mob .. ") — бросаю")
+            pcall(function() CommF:InvokeServer("AbandonQuest") end)
+            ResetQuestState()
+            QuestState.LastTry = 0
+            return
+        end
+
+        QuestState.Confirmed = true
+        QuestState.LastSeen  = tick()
+        QuestKillCount = 0
+        CompleteStallSince = nil
+        QuestState.Mob = best.Mob or parsed
+        QuestState.DeepFish = IsDeepFishmanQuest(best)
+        UpdateStatus("✅ Квест взят: " .. taken.Name
+            .. " | моб: " .. tostring(QuestState.Mob)
+            .. (QuestState.DeepFish and " [underwater]" or ""))
+    else
+        if arrived then
+            UpdateStatus("⏳ Трекер не показал квест — фарм: " .. tostring(best.Mob or "?") .. " (повтор через " .. QUEST_GRACE .. "с)")
+        else
+            UpdateStatus("⏳ Не доехал до NPC — повтор через " .. QUEST_GRACE .. "с")
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(Sec)
+        if not _G.Level then continue end
+        pcall(QuestFarmStep)
+    end
+end)
+
+-- Nearest
+task.spawn(function()
+    while task.wait(0.08) do
+        if not _G.AutoFarmNear then continue end
+        pcall(function()
+            local enemies = workspace:FindFirstChild("Enemies")
+            if not enemies then return end
+            for _, v in pairs(enemies:GetChildren()) do
+                if Attack.Alive(v) then
+                    Attack.Kill(v, true)
+                    break
+                end
+            end
+        end)
+    end
+end)
+
+-- Selected Mob
+task.spawn(function()
+    while task.wait(0.08) do
+        if not _G.AutoKillMob or not SelectMob then continue end
+        pcall(function()
+            local enemies = workspace:FindFirstChild("Enemies")
+            if not enemies then return end
+            for _, v in pairs(enemies:GetChildren()) do
+                if v.Name == SelectMob and Attack.Alive(v) then
+                    Attack.Kill(v, true)
+                    break
+                end
+            end
+        end)
+    end
+end)
+
+-- ═════════════════════════════════════════════════════════
+--  ON-JOIN + ПОСТОЯННЫЕ ФУНКЦИИ
+-- ═════════════════════════════════════════════════════════
+
+-- Команда Пиратов
+task.spawn(function()
+    local deadline = tick() + 60
+    while tick() < deadline and not CommF do task.wait(0.5) end
+    if CommF then
+        pcall(function() CommF:InvokeServer("SetTeam", "Pirates") end)
+        print("[OK Hub] Team set: Pirates")
+    end
+end)
+
+-- Активация кодов
+task.spawn(function()
+    task.wait(15)
+    local codes = {
+        "LIGHTNINGABUSE","1LOSTADMIN","ADMINFIGHT","GIFTING_HOURS","NOMOREHACK",
+        "BANEXPLOIT","WildDares","BossBuild","GetPranked","EARN_FRUITS",
+        "SUB2GAMERROBOT_RESET1","KITT_RESET","Bignews","CHANDLER","Fudd10",
+        "fudd10_v2","Sub2UncleKizaru","FIGHT4FRUIT","kittgaming","TRIPLEABUSE",
+        "Sub2CaptainMaui","Sub2Fer999","Enyu_is_Pro","Magicbus","JCWK",
+        "Starcodeheo","Bluxxy","SUB2GAMERROBOT_EXP1","Sub2NoobMaster123",
+        "Sub2Daigrock","Axiore","TantaiGaming","StrawHatMaine","Sub2OfficialNoobie",
+        "TheGreatAce","JULYUPDATE_RESET","ADMINHACKED","SEATROLLING","24NOADMIN",
+        "ADMIN_TROLL","NEWTROLL","SECRET_ADMIN","staffbattle","NOEXPLOIT",
+        "NOOB2ADMIN","CODESLIDE","fruitconcepts","krazydares"
+    }
+
+    local RemotesFolder = replicated:FindFirstChild("Remotes")
+    local RedeemRemote = RemotesFolder and RemotesFolder:FindFirstChild("Redeem")
+    if not RedeemRemote then return end
+
+    local redeemed = 0
+    for _, code in ipairs(codes) do
+        task.wait(0.1)
+        pcall(function()
+            if RedeemRemote.InvokeServer then
+                RedeemRemote:InvokeServer(code)
+            else
+                RedeemRemote:FireServer(code)
+            end
+            redeemed += 1
+        end)
+    end
+    print("[OK Hub] Коды активированы: " .. redeemed .. "/" .. #codes)
+end)
+
+-- Hop при админе
+local function Hop()
+    pcall(function()
+        local servers
+        local ok = pcall(function()
+            servers = HttpService:JSONDecode(game:HttpGet(
+                "https://games.roblox.com/v1/games/" .. game.PlaceId ..
+                "/servers/Public?sortOrder=Asc&limit=100"
+            ))
+        end)
+        if not ok or not servers or not servers.data then return end
+
+        local myJobId = game.JobId
+        for _, server in ipairs(servers.data) do
+            if server.id ~= myJobId and server.playing < server.maxPlayers then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+                task.wait(5)
+            end
+        end
+    end)
+end
+
+getgenv().HopServerAdmin = true
+
+local ADMIN_NAMES = {
+    "red_game43", "rip_indra", "Axiore", "Polkster", "wenlocktoad",
+    "Daigrock", "toilamvidamme", "oofficialnoobie", "Uzoth", "Azarth",
+    "arlthmetic", "Death_King", "Lunoven", "TheGreateAced", "rip_fud",
+    "drip_mama", "layandikit12", "Hingoi"
+}
+
+task.spawn(function()
+    local lastHopTry = 0
+    while task.wait(2) do
+        pcall(function()
+            if not getgenv().HopServerAdmin then return end
+            if tick() - lastHopTry < 30 then return end
+            for _, v in pairs(Players:GetPlayers()) do
+                local low = (v.Name or ""):lower()
+                for _, admin in ipairs(ADMIN_NAMES) do
+                    if low == admin:lower() then
+                        UpdateStatus("🚨 Админ на сервере: " .. v.Name .. " — хоп!")
+                        lastHopTry = tick()
+                        Hop()
+                        return
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- Anti AFK
+task.spawn(function()
+    repeat task.wait() until game:IsLoaded()
+    LocalPlayer.Idled:Connect(function()
+        pcall(function()
+            VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+            task.wait(1)
+            VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+        end)
+    end)
+end)
+
+-- Auto Buso
+task.spawn(function()
+    while task.wait(Sec) do
+        pcall(function()
+            if _G.Level and LocalPlayer.Character and not LocalPlayer.Character:FindFirstChild("HasBuso") then
+                if CommF then
+                    CommF:InvokeServer("Buso")
+                end
+            end
+        end)
+    end
+end)
+
+-- Auto buy Buso
+task.spawn(function()
+    local deadline = tick() + 60
+    while tick() < deadline and not CommF do task.wait(0.5) end
+    if CommF then
+        task.wait(5)
+        pcall(function() CommF:InvokeServer("BuyHaki", "Buso") end)
+        print("[OK Hub] BuyHaki(Buso) отправлен")
+    end
+end)
+
+-- Автопрокачка Melee
+local pSats = 10
+
+local function statsSetings(Num, value)
+    local data = LocalPlayer:FindFirstChild("Data")
+    local points = data and data:FindFirstChild("Points")
+    if not points or points.Value == 0 then return end
+    if CommF then
+        if Num == "Melee" then
+            CommF:InvokeServer("AddPoint", "Melee", value)
+        elseif Num == "Defense" then
+            CommF:InvokeServer("AddPoint", "Defense", value)
+        elseif Num == "Sword" then
+            CommF:InvokeServer("AddPoint", "Sword", value)
+        elseif Num == "Gun" then
+            CommF:InvokeServer("AddPoint", "Gun", value)
+        elseif Num == "Devil" then
+            CommF:InvokeServer("AddPoint", "Demon Fruit", value)
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(Sec) do
+        pcall(function()
+            if _G.Level and _G.Auto_Melee then
+                statsSetings("Melee", pSats)
+            end
+        end)
+    end
+end)
+
+-- Travel Sea 2 (Dressrosa), уровень 700+
+local ICE_DOOR_CF = CFrame.new(1347.7124, 37.3751602, -1325.6488)
+
+task.spawn(function()
+    while task.wait(Sec) do
+        pcall(function()
+            TravelActive = false
+            if not _G.Level then return end
+            local lvl = GetPlayerLevel() or 0
+            if not (World1 and lvl >= 700) then return end
+            if not CommF then return end
+            TravelActive = true
+
+            UpdateStatus("🌊 Sea 2: прохождение перехода")
+
+            local door
+            pcall(function() door = workspace.Map.Ice.Door end)
+
+            if door and door.CanCollide == true and door.Transparency == 0 then
+                CommF:InvokeServer("DressrosaQuestProgress", "Detective")
+                EquipWeapon("Key")
+                _tp(ICE_DOOR_CF)
+
+            elseif door and door.CanCollide == false and door.Transparency == 1 then
+                local adm = GetConnectionEnemies("Ice Admiral")
+                if adm and Attack.Alive(adm) then
+                    Attack.Kill(adm, true)
+                else
+                    local en = workspace:FindFirstChild("Enemies")
+                    local dead = en and en:FindFirstChild("Ice Admiral")
+                    if dead and dead:FindFirstChildOfClass("Humanoid") and dead.Humanoid.Health <= 0 then
+                        CommF:InvokeServer("TravelDressrosa")
+                    else
+                        _tp(ICE_DOOR_CF)
+                    end
+                end
+
+            else
+                CommF:InvokeServer("TravelDressrosa")
+            end
+        end)
+    end
+end)
+
+-- Travel Sea 3 (Zou), уровень 1500+
+local PLATES = {
+    CFrame.new(-1850.49329, 13.1789551, 1750.89685),
+    CFrame.new(-1858.87305, 19.3777466, 1712.01807),
+    CFrame.new(-1803.94324, 16.5789185, 1750.89685),
+    CFrame.new(-1858.55835, 16.8604317, 1724.79541),
+    CFrame.new(-1869.54224, 15.987854, 1681.00659),
+    CFrame.new(-1800.0979, 16.4978027, 1684.52368),
+    CFrame.new(-1819.26343, 14.795166, 1717.90625),
+    CFrame.new(-1813.51843, 14.8604736, 1724.79541),
+}
+local plateIndex = 1
+
+local function TryTrevor()
+    if not CommF then return end
+    pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "1") end)
+    task.wait(0.1)
+    pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "2") end)
+    task.wait(0.1)
+    pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "3") end)
+end
+
+task.spawn(function()
+    while task.wait(Sec) do
+        pcall(function()
+            ZouActive = false
+            if not _G.Level then return end
+            local lvl = GetPlayerLevel() or 0
+            if not (World2 and lvl >= 1500) then return end
+            if not CommF then return end
+            ZouActive = true
+
+            local progress = -1
+            pcall(function() progress = CommF:InvokeServer("BartiloQuestProgress", "Bartilo") end)
+
+            if progress ~= 2 then plateIndex = 1 end
+
+            if progress == 3 then
+                local unlockables = nil
+                pcall(function() unlockables = CommF:InvokeServer("GetUnlockables") end)
+
+                if unlockables and unlockables.FlamingoAccess ~= nil then
+                    pcall(function() CommF:InvokeServer("F_", "TravelZou") end)
+
+                    local zcheck = -1
+                    pcall(function() zcheck = CommF:InvokeServer("ZQuestProgress", "Check") end)
+
+                    if zcheck == 0 then
+                        local indra = GetConnectionEnemies("rip_indra")
+                        if indra then
+                            Attack.Kill(indra, true)
+                        else
+                            pcall(function() CommF:InvokeServer("F_", "ZQuestProgress", "Begin") end)
+                        end
+
+                    elseif zcheck == 1 then
+                        pcall(function() CommF:InvokeServer("F_", "TravelZou") end)
+
+                    else
+                        local swan = GetConnectionEnemies("Don Swan")
+                        if swan then
+                            Attack.Kill(swan, true)
+                        else
+                            _tp(CFrame.new(2288.802, 15.1870775, 863.034607))
+                        end
+                    end
+
+                else
+                    local stored, openable = {}, {}
+                    pcall(function()
+                        local inv = CommF:InvokeServer("getInventoryFruits")
+                        if type(inv) == "table" then
+                            for _, v in pairs(inv) do
+                                if type(v) == "table" and v.Name then
+                                    table.insert(stored, v.Name)
+                                end
+                            end
+                        end
+                    end)
+                    pcall(function()
+                        local fruits = CommF:InvokeServer("GetFruits")
+                        if type(fruits) == "table" then
+                            for _, v in pairs(fruits) do
+                                if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
+                                    table.insert(openable, v.Name)
+                                end
+                            end
+                        end
+                    end)
+
+                    local acted = false
+                    for _, fruitName in pairs(openable) do
+                        for _, storedName in pairs(stored) do
+                            if fruitName == storedName then
+                                if not LocalPlayer.Backpack:FindFirstChild(storedName) then
+                                    pcall(function() CommF:InvokeServer("F_", "LoadFruit", storedName) end)
+                                else
+                                    TryTrevor()
+                                end
+                                acted = true
+                            end
+                        end
+                    end
+                    if not acted then
+                        TryTrevor()
+                    end
+                end
+
+            elseif progress == 0 then
+                local q = GetCurrentQuest()
+                local qtext = q and ((q.Name or "") .. " " .. (q.Target or "")) or ""
+                if TextHas(qtext, "Swan Pirates") and TextHas(qtext, "50") then
+                    local sp = FindMob("Swan Pirate")
+                    if sp then
+                        Attack.Kill(sp, true)
+                    else
+                        _tp(CFrame.new(1057.92761, 137.614319, 1242.08069))
+                    end
+                else
+                    _tp(CFrame.new(-456.28952, 73.0200958, 299.895966))
+                end
+
+            elseif progress == 1 then
+                local jeremy = GetConnectionEnemies("Jeremy")
+                if jeremy then
+                    Attack.Kill(jeremy, true)
+                else
+                    _tp(CFrame.new(2099.88159, 448.931, 648.997375))
+                end
+
+            elseif progress == 2 then
+                _tp(CFrame.new(-1836, 11, 1714))
+
+                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root and (root.Position - PLATES[plateIndex].Position).Magnitude <= 8 then
+                    notween(PLATES[plateIndex])
+                    plateIndex += 1
+                    if plateIndex > #PLATES then plateIndex = 1 end
+                elseif root then
+                    _tp(PLATES[plateIndex])
+                end
+            end
+        end)
+    end
+end)
+
+-- ==================== UI (OBSIDIAN + фолбэк) ====================
+local Obsidian = nil
+local UI_SOURCES = {
+    "https://raw.githubusercontent.com/deividcomsono/Obsidian/refs/heads/main/Source.lua",
+    "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/Source.lua",
+    "https://cdn.jsdelivr.net/gh/deividcomsono/Obsidian@main/Source.lua",
+}
+for _, url in ipairs(UI_SOURCES) do
+    local ok, result = pcall(function()
+        local src = game:HttpGet(url)
+        assert(src and #src > 500 and not src:lower():find("<!doctype html"), "битый ответ")
+        return loadstring(src)()
+    end)
+    if ok and type(result) == "table" and result.CreateWindow then
+        Obsidian = result
+        break
+    end
+end
+
+local function BuildFallbackUI()
+    pcall(function()
+        local pg = LocalPlayer:WaitForChild("PlayerGui")
+        local gui = Instance.new("ScreenGui")
+        gui.Name = "OKHub_Fallback"
+        gui.ResetOnSpawn = false
+        gui.Parent = pg
+
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.fromOffset(210, 170)
+        frame.Position = UDim2.new(0, 12, 0.4, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+        frame.BorderSizePixel = 0
+        frame.Active = true
+        frame.Draggable = true
+        frame.Parent = gui
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 8); c.Parent = frame
+
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, 0, 0, 26)
+        title.BackgroundTransparency = 1
+        title.Text = "OK Hub | Auto Farm"
+        title.TextColor3 = Color3.new(1, 1, 1)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 14
+        title.Parent = frame
+
+        local function mkBtn(y, text, state)
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1, -16, 0, 28)
+            b.Position = UDim2.new(0, 8, 0, y)
+            b.BackgroundColor3 = state and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
+            b.TextColor3 = Color3.new(1, 1, 1)
+            b.Font = Enum.Font.Gotham
+            b.TextSize = 12
+            b.Text = text
+            b.Parent = frame
+            local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 6); bc.Parent = b
+            return b
+        end
+
+        local tgl = mkBtn(32, "Auto Farm Level: OFF", false)
+        tgl.MouseButton1Click:Connect(function()
+            _G.Level = not _G.Level
+            tgl.Text = "Auto Farm Level: " .. (_G.Level and "ON" or "OFF")
+            tgl.BackgroundColor3 = _G.Level and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
+        end)
+
+        local km = mkBtn(66, "Auto Kill Mob: OFF", false)
+        km.MouseButton1Click:Connect(function()
+            _G.AutoKillMob = not _G.AutoKillMob
+            km.Text = "Auto Kill Mob: " .. (_G.AutoKillMob and "ON" or "OFF")
+            km.BackgroundColor3 = _G.AutoKillMob and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
+        end)
+
+        local br = mkBtn(100, "Bring: " .. (_B and "ON" or "OFF"), _B)
+        br.MouseButton1Click:Connect(function()
+            _B = not _B
+            br.Text = "Bring: " .. (_B and "ON" or "OFF")
+            br.BackgroundColor3 = _B and Color3.fromRGB(40, 130, 60) or Color3.fromRGB(60, 60, 70)
+        end)
+
+        local st = Instance.new("TextLabel")
+        st.Size = UDim2.new(1, -16, 0, 40)
+        st.Position = UDim2.new(0, 8, 1, -44)
+        st.BackgroundTransparency = 1
+        st.TextColor3 = Color3.fromRGB(200, 200, 200)
+        st.TextWrapped = true
+        st.Font = Enum.Font.Gotham
+        st.TextSize = 11
+        st.TextXAlignment = Enum.TextXAlignment.Left
+        st.Text = "Idle"
+        st.Parent = frame
+
+        StatusLabel = { SetText = function(_, t) st.Text = tostring(t) end }
+        lastStatus = ""
+    end)
+end
+
+if Obsidian then
+    local ok, err = pcall(function()
+        local Window = Obsidian:CreateWindow({
+            Title = "OK Hub | Auto Quest Farm",
+            Footer = "damage-confirmed bring • underwater v3.1",
+            Center = true,
+            AutoShow = true,
+            ToggleKeybind = Enum.KeyCode.RightControl,
+        })
+
+        local FarmTab = Window:AddTab({ Title = "Farm", Icon = "swords" })
+        local SetTab  = Window:AddTab({ Title = "Settings", Icon = "settings" })
+
+        local Main = FarmTab:AddLeftGroupbox("Auto Farm")
+        Main:AddToggle("Level", {
+            Text = "Auto Farm Level (квесты + travel)",
+            Default = false,
+            Callback = function(v)
+                _G.Level = v
+                if v then QuestState.LastTry = 0 end
+            end,
+        })
+        Main:AddToggle("Near", {
+            Text = "Auto Farm Nearest",
+            Default = false,
+            Callback = function(v) _G.AutoFarmNear = v end,
+        })
+        Main:AddToggle("KillMob", {
+            Text = "Auto Kill Mob (по выбору)",
+            Default = false,
+            Callback = function(v) _G.AutoKillMob = v end,
+        })
+        Main:AddDropdown("Weapon", {
+            Values = { "Melee", "Sword", "Blox Fruit", "Gun" },
+            Default = "Melee",
+            Multi = false,
+            Text = "Weapon",
+            Callback = function(v) _G.ChooseWP = v end,
+        })
+
+        local mobs = World1 and { "Bandit","Monkey","Gorilla","Pirate","Brute","Desert Bandit","Snow Bandit","Chief Petty Officer","Sky Bandit","Military Soldier","Fishman Warrior","Shanda","Royal Squad","Galley Captain" }
+            or World2 and { "Raider","Mercenary","Swan Pirate","Factory Staff","Marine Lieutenant","Zombie","Vampire","Snow Trooper","Lab Subordinate","Magma Ninja","Ship Deckhand","Arctic Warrior","Water Fighter" }
+            or { "Pirate Millionaire","Dragon Crew Warrior","Marine Commodore","Fishman Raider","Forest Pirate","Mythological Pirate","Reborn Skeleton","Cookie Crafter","Cocoa Warrior" }
+
+        local MobG = FarmTab:AddRightGroupbox("Mobs")
+        MobG:AddDropdown("MobSel", {
+            Values = mobs,
+            Default = mobs[1],
+            Multi = false,
+            Text = "Mob (для Auto Kill Mob)",
+            Callback = function(v) SelectMob = v end,
+        })
+
+        local St = FarmTab:AddRightGroupbox("Статус")
+        StatusLabel = St:AddParagraph("Статус", "Idle")
+        lastStatus = ""
+
+        local S1 = SetTab:AddLeftGroupbox("Bring")
+        S1:AddToggle("Bring", {
+            Text = "Bring Mobs (после урона)",
+            Default = true,
+            Callback = function(v) _B = v end,
+        })
+
+        local S2 = SetTab:AddRightGroupbox("Прочее")
+        S2:AddToggle("HopAdmin", {
+            Text = "Hop при админе",
+            Default = true,
+            Callback = function(v) getgenv().HopServerAdmin = v end,
+        })
+        S2:AddButton({
+            Text = "Сбросить состояние квеста",
+            Func = function()
+                pcall(function() CommF:InvokeServer("AbandonQuest") end)
+                ResetQuestState()
+                lastStatus = ""
+            end,
+        })
+        S2:AddButton({
+            Text = "Выгрузить скрипт",
+            Func = function()
+                _G.Level, _G.AutoFarmNear, _G.AutoKillMob = false, false, false
+                shouldTween = false
+                pcall(function() block:Destroy() end)
+                pcall(function() Obsidian:Destroy() end)
+            end,
+        })
+    end)
+    if not ok then
+        warn("[OK Hub] Ошибка Obsidian UI: " .. tostring(err))
+        Obsidian = nil
+    end
+end
+if not Obsidian then
+    BuildFallbackUI()
+end
+
+-- ==================== HOOKS ====================
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    pcall(function() block.CFrame = LocalPlayer.Character.PrimaryPart.CFrame end)
+    activeTween, activeTarget = nil, nil
+    wdLastBlockPos, wdStuckTime = nil, 0
+    UWRouteBusy = false
+    EntHighlight, EntBillboard = nil, nil
+    CompleteStallSince = nil
+    ResetQuestState()
+    plateIndex = 1
+    table.clear(DamageConfirmed)
+    table.clear(BringFails)
+    table.clear(BringLastChk)
+    table.clear(BringStuck)
+    table.clear(NoBring)
+    table.clear(HitOrder)
+end)
+
+print("[OK Hub] Full loaded — damage-confirmed bring + underwater v3.1")
