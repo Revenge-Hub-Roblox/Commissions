@@ -104,8 +104,8 @@ local BRING_TEST_INTERVAL = 0.4
 local BRING_MAX_FAILS     = 3
 
 local UW_X             = 50000
-local UW_ENTER         = Vector3.new(4050.31, -1.69, -1814.12)
-local UW_CITY_EXIT     = Vector3.new(61170.05, -2, 1952.83)
+local UW_ENTER         = Vector3.new(4050.31, -3, -1814.12)
+local UW_CITY_EXIT     = Vector3.new(61170.05, -3, 1952.83)
 local UW_OUT           = Vector3.new(4050, 30, -1814)
 local UW_QUESTSPOT     = Vector3.new(61122, 25, 1569)
 local UW_REMOTE_EVERY  = 1.5
