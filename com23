@@ -867,62 +867,6 @@ local function ReqEnter(vec)
     end
 end
 
-local EntHighlight, EntBillboard = nil, nil
-local function SetupEntranceVisual()
-    if EntHighlight and EntHighlight.Parent then return end
-    pcall(function()
-        local map = workspace:FindFirstChild("Map")
-        local cavern = map and map:FindFirstChild("Fishmen")
-            and map.Fishmen:FindFirstChild("FishmanCavern")
-        local ent = cavern and cavern:FindFirstChild("Entrance")
-        if not ent then
-            ent = workspace:FindFirstChild("Entrance", true)
-        end
-        if not ent then return end
-
-        local base = ent:IsA("BasePart") and ent
-            or ent.PrimaryPart or ent:FindFirstChildWhichIsA("BasePart")
-        if not base then return end
-
-        if base.Position.X > UW_X then return end
-
-        print("[Frozent0] Entrance found: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
-
-        EntHighlight = Instance.new("Highlight")
-        EntHighlight.Name = "Frozent0_EntranceHL"
-        EntHighlight.FillColor = Color3.fromRGB(255, 100, 0)
-        EntHighlight.OutlineColor = Color3.fromRGB(255, 255, 0)
-        EntHighlight.FillTransparency = 0.6
-        EntHighlight.OutlineTransparency = 0
-        EntHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        EntHighlight.Adornee = base
-        EntHighlight.Parent = base
-
-        local bb = Instance.new("BillboardGui")
-        bb.Name = "Frozent0_EntranceBB"
-        bb.Size = UDim2.new(0, 220, 0, 60)
-        bb.StudsOffset = Vector3.new(0, 6, 0)
-        bb.AlwaysOnTop = true
-        bb.Adornee = base
-        bb.Parent = base
-
-        local tl = Instance.new("TextLabel")
-        tl.Size = UDim2.new(1, 0, 1, 0)
-        tl.BackgroundTransparency = 1
-        tl.TextColor3 = Color3.fromRGB(255, 255, 0)
-        tl.TextStrokeTransparency = 0
-        tl.TextScaled = true
-        tl.Font = Enum.Font.GothamBold
-        tl.Text = "ENTRANCE (fishman)"
-        tl.Parent = bb
-
-        EntBillboard = bb
-    end)
-end
-task.spawn(function()
-    task.wait(3)
-    while task.wait(5) do SetupEntranceVisual() end
-end)
 
 local function AtEntrance()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
