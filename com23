@@ -1,18 +1,5 @@
---[[
-    OK Hub - Auto Quest Farm (Config Edition)
-    • Конфиг через getgenv().OKHUB_CONFIG (задаётся ДО loadstring)
-    • Без GUI: Auto Farm работает сразу из конфига, Bring встроен
-    • Auto Buy Random Fruit, Auto Store Fruit, Discord Webhook (lvl + money + fruits)
-    • QueueOnTeleport: перезапуск после хопа/телепорта
-    • Damage-confirmed bring: только урон получившие мобы стягиваются в стак
-    • Underwater route v3.1, ровно 200 sps, watchdog, честная ротация ударов
-]]
-
 repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 
--- ═════════════════════════════════════════════════════════
---  CONFIG (из getgenv().OKHUB_CONFIG или дефолты)
--- ═════════════════════════════════════════════════════════
 local cfg = getgenv().OKHUB_CONFIG or {}
 
 local function CfgBool(key, default)
@@ -46,17 +33,13 @@ local World3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
 
 _G.SelectWeapon = "Melee"
 _G.ChooseWP     = "Melee"
-_G.Level        = CONFIG.AutoFarm   -- 🔧 фарм включается сразу из конфига
+_G.Level        = CONFIG.AutoFarm
 _G.Auto_Melee   = true
-_B              = true               -- bring встроен в Auto Farm
+_B              = true
 
 local Sec         = 0.06
 local shouldTween = false
 local OnFarm      = false
-
--- ═════════════════════════════════════════════════════════
---  ANTICHEAT BYPASS + NOFALL
--- ═════════════════════════════════════════════════════════
 
 pcall(function()
     if replaceclosure and newcclosure and checkcaller and getinfo then
@@ -91,9 +74,6 @@ pcall(function()
     end
 end)
 
--- ═════════════════════════════════════════════════════════
---  QUEUE ON TELEPORT (перезапуск после хопа)
--- ═════════════════════════════════════════════════════════
 if CONFIG.QueueOnTeleport and queue_on_teleport then
     local self_src = [[
 getgenv().OKHUB_CONFIG = ]] .. HttpService:JSONEncode(cfg) .. [[
@@ -104,7 +84,6 @@ loadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Co
     print("[OK Hub] QueueOnTeleport: on")
 end
 
--- ==================== НАСТРОЙКИ ====================
 local MOVE_SPEED = 200
 
 local QUEST_GRACE        = 12
@@ -131,11 +110,14 @@ local UW_REMOTE_EVERY  = 1.5
 local UW_MAX_TIME      = 60
 local UW_ARRIVE_RADIUS = 60
 
+local SEA2_MIN_LEVEL   = 701
+local SEA2_DOOR_CF     = CFrame.new(1288.73328, 35.8959961, -1361.06274, -0.70963943, 0, -0.704565167, 0, 1, 0, 0.704565167, 0, -0.70963943)
+local SEA2_TRAVEL_MIN  = 1500
+
 local UWRouteBusy = false
 
 local QUEST_GIVERS = {}
 
--- ==================== СОСТОЯНИЕ ====================
 local QuestState = {
     Mob       = nil,
     Need      = nil,
@@ -152,14 +134,14 @@ local TravelActive       = false
 local ZouActive          = false
 
 local DamageConfirmed = {}
-local DamageHP        = {}  -- 🔧 чистое HP-хранилище (вместо грязных строковых ключей)
+local DamageHP        = {}
 local BringFails      = {}
 local BringLastChk    = {}
 local BringStuck      = {}
 local NoBring         = {}
 local HitOrder        = {}
 
-local StatusLabel, lastStatus = nil, ""
+local lastStatus = ""
 
 local function UpdateStatus(t)
     if t == lastStatus then return end
@@ -177,7 +159,6 @@ local function CleanupMobTables(m)
     HitOrder[m]        = nil
 end
 
--- ==================== BLOCK + TWEEN ====================
 local block = Instance.new("Part")
 block.Name = "FarmBlock"
 block.Size = Vector3.new(2, 2, 2)
@@ -251,7 +232,6 @@ task.spawn(function()
     end
 end)
 
--- ровно MOVE_SPEED на любой дистанции
 _tp = function(cf, force)
     if typeof(cf) == "Vector3" then cf = CFrame.new(cf) end
     if typeof(cf) ~= "CFrame" then return end
@@ -285,7 +265,6 @@ _tp = function(cf, force)
     end)
 end
 
--- WATCHDOG полёта
 local wdLastBlockPos, wdStuckTime = nil, 0
 
 task.spawn(function()
@@ -335,7 +314,6 @@ notween = function(cf)
     end
 end
 
--- ==================== WEAPON ====================
 local function EquipWeapon(name)
     if not name then return end
     local tool = LocalPlayer.Backpack:FindFirstChild(name) or LocalPlayer.Character:FindFirstChild(name)
@@ -357,11 +335,9 @@ task.spawn(function()
     end
 end)
 
--- ==================== BRING (damage-confirmed) ====================
-
 task.spawn(function()
     if not sethiddenproperty then
-        warn("[OK Hub] sethiddenproperty недоступен — bring будет частичным")
+        warn("[OK Hub] sethiddenproperty unavailable, bring will be partial")
         return
     end
     RunService.Stepped:Connect(function()
@@ -387,7 +363,6 @@ local function ReleaseMob(v, hum, root)
     end)
 end
 
--- ⚔ в стак только урон получившие мобы
 local function BringEnemy(Mon)
     if not _B or not Mon or not Mon:FindFirstChild("HumanoidRootPart") then return end
     pcall(function()
@@ -442,7 +417,6 @@ local function BringEnemy(Mon)
     end)
 end
 
--- ==================== ATTACK ====================
 local Attack = {}
 
 Attack.Alive = function(m)
@@ -472,7 +446,6 @@ Attack.Kill = function(model, active)
     _tp(targetCF)
 end
 
--- ⚔️ КЛИКЕР + RegisterHit (честная ротация + подтверждение урона)
 local ATTACK_CHUNK = 2
 local MAX_PAIRS    = 5
 local CHUNK_DELAY  = 0.03
@@ -563,7 +536,6 @@ task.spawn(function()
                 end
             end
 
-            -- ⚔ подтверждение урона: HP изменилось → моб прогружен, можно бринжать
             for _, v in ipairs(pool) do
                 local hum = v.mob:FindFirstChildOfClass("Humanoid")
                 if hum then
@@ -580,7 +552,6 @@ task.spawn(function()
     end
 end)
 
--- ==================== ДЕТЕКЦИЯ КВЕСТА ====================
 local function GetCurrentQuest()
     local ok, res = pcall(function()
         local tracked = LocalPlayer.PlayerGui:FindFirstChild("TrackedQuestFrame")
@@ -610,7 +581,6 @@ local function ParseProgress(str)
     return nil, nil
 end
 
--- ==================== ТЕКСТ И ИМЕНА ====================
 local function Norm(s)
     s = (s or ""):lower():gsub("[^%w%s]", " ")
     return (s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
@@ -637,7 +607,6 @@ local function SameMob(enemyName, target)
     return sa ~= "" and sa == sb
 end
 
--- ==================== УРОВЕНЬ ====================
 local function GetPlayerLevel()
     local ok, lvl = pcall(function()
         local d = LocalPlayer:FindFirstChild("Data")
@@ -656,7 +625,6 @@ local function GetPlayerLevel()
     return nil
 end
 
--- ==================== МОДУЛИ / REMOTES ====================
 local QuestModule, GuideModule, CommF
 task.spawn(function()
     pcall(function() QuestModule = require(replicated:WaitForChild("Quests", 15)) end)
@@ -666,7 +634,6 @@ end)
 
 local blacklist = { "MarineQuest", "BartiloQuest", "CitizenQuest", "Trainees" }
 
--- ==================== ПОЛНЫЙ ПУЛ ИМЁН ====================
 local AllMobNames = {}
 local ModulePoolLoaded = false
 
@@ -717,7 +684,6 @@ task.spawn(function()
     end
 end)
 
--- ==================== ВЫБОР КВЕСТА ====================
 local function GetBestQuest()
     local lvl = GetPlayerLevel() or 0
 
@@ -760,10 +726,6 @@ local function GetBestQuest()
     return best
 end
 
--- ═════════════════════════════════════════════════════════
---  🔧 UNDERWATER CITY ROUTE v3.1
--- ═════════════════════════════════════════════════════════
-
 local function InUnderwater()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     return root ~= nil and root.Position.X > UW_X
@@ -781,7 +743,6 @@ local function ReqEnter(vec)
     end
 end
 
--- подсветка Entrance
 local EntHighlight, EntBillboard = nil, nil
 local function SetupEntranceVisual()
     if EntHighlight and EntHighlight.Parent then return end
@@ -801,7 +762,7 @@ local function SetupEntranceVisual()
 
         if base.Position.X > UW_X then return end
 
-        print("[OK Hub] ✅ Entrance найден: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
+        print("[OK Hub] Entrance found: " .. base:GetFullName() .. " @ " .. tostring(base.Position))
 
         EntHighlight = Instance.new("Highlight")
         EntHighlight.Name = "OKHub_EntranceHL"
@@ -828,7 +789,7 @@ local function SetupEntranceVisual()
         tl.TextStrokeTransparency = 0
         tl.TextScaled = true
         tl.Font = Enum.Font.GothamBold
-        tl.Text = "⬇ ENTRANCE (fishman)"
+        tl.Text = "ENTRANCE (fishman)"
         tl.Parent = bb
 
         EntBillboard = bb
@@ -855,7 +816,7 @@ local function EnterUnderwaterCity()
     local ok = false
 
     local targetCF = CFrame.new(UW_ENTER + Vector3.new(0, 4, 0))
-    UpdateStatus("🕳 Fishman: лечу к каверне (Entrance)...")
+    UpdateStatus("Fishman: flying to cavern entrance")
     _tp(targetCF)
 
     local lastFire = 0
@@ -865,7 +826,7 @@ local function EnterUnderwaterCity()
 
         if InUnderwater() then
             ok = true
-            UpdateStatus("🕳 Fishman: мы в подводном городе")
+            UpdateStatus("Fishman: inside underwater city")
             break
         end
 
@@ -882,7 +843,7 @@ local function EnterUnderwaterCity()
     end
 
     if not ok then
-        UpdateStatus("🕳 Fishman: last-resort TP в город")
+        UpdateStatus("Fishman: last resort TP into city")
         notween(CFrame.new(UW_QUESTSPOT))
         task.wait(0.4)
         ok = InUnderwater()
@@ -910,7 +871,7 @@ local function ExitUnderwaterCity()
     end)
 
     local targetCF = CFrame.new(exitPos + Vector3.new(0, 4, 0))
-    UpdateStatus("🕳 Fishman: выход из города...")
+    UpdateStatus("Fishman: exiting city")
     _tp(targetCF)
 
     local lastFire = 0
@@ -920,7 +881,7 @@ local function ExitUnderwaterCity()
 
         if not InUnderwater() then
             ok = true
-            UpdateStatus("🕳 Fishman: вышли, обычный маршрут")
+            UpdateStatus("Fishman: exited, normal route")
             break
         end
 
@@ -937,7 +898,7 @@ local function ExitUnderwaterCity()
     end
 
     if not ok then
-        UpdateStatus("🕳 Fishman: last-resort TP наружу")
+        UpdateStatus("Fishman: last resort TP outside")
         notween(CFrame.new(UW_OUT))
         task.wait(0.4)
         ok = not InUnderwater()
@@ -947,7 +908,6 @@ local function ExitUnderwaterCity()
     return ok
 end
 
--- ==================== ВЗЯТИЕ КВЕСТА ====================
 local function FindNPCModel(name)
     if not name or name == "" then return nil, nil end
     local npc = workspace:FindFirstChild(name, true)
@@ -1052,7 +1012,6 @@ local function TryStartQuest(best)
     return nil
 end
 
--- ==================== ПАРСИНГ МОБА ====================
 local QuestMobCache = {}
 
 local function GetQuestMob(quest)
@@ -1079,7 +1038,6 @@ local function GetQuestMob(quest)
     return best
 end
 
--- ==================== ФАРМ МОБОВ КВЕСТА ====================
 local SpawnFolder
 pcall(function()
     local wo = workspace:FindFirstChild("_WorldOrigin")
@@ -1111,7 +1069,6 @@ local function FindMob(mob)
     return best
 end
 
--- ⚔ ближайший НЕ подтверждённый квестовый моб (облетаем по одному)
 local function FindUnconfirmedMob(mob)
     local enemies = workspace:FindFirstChild("Enemies")
     if not enemies then return nil end
@@ -1139,14 +1096,12 @@ local function FarmQuestMob(mob)
         if not ExitUnderwaterCity() then return end
     end
 
-    -- ⚔ фаза 1: облетаем неподтверждённых
     local unconf = FindUnconfirmedMob(mob)
     if unconf then
         Attack.Kill(unconf, true)
         return
     end
 
-    -- ⚔ фаза 2: все подтверждены → фарм со стаком
     local target = FindMob(mob)
     if target then
         Attack.Kill(target, true)
@@ -1212,7 +1167,6 @@ local function ResetQuestState()
     CompleteStallSince = nil
 end
 
--- ==================== ГЛАВНЫЙ ЦИКЛ ====================
 local function QuestFarmStep()
     local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
@@ -1230,7 +1184,7 @@ local function QuestFarmStep()
         if a and b and b > 0 and a >= b then
             CompleteStallSince = CompleteStallSince or now
             if now - CompleteStallSince >= COMPLETE_STALL then
-                UpdateStatus("🏆 Квест завершён (трекер не очистился) — беру следующий")
+                UpdateStatus("Quest done, tracker not cleared, taking next")
                 pcall(function() CommF:InvokeServer("AbandonQuest") end)
                 ResetQuestState()
                 QuestState.LastTry = 0
@@ -1249,7 +1203,7 @@ local function QuestFarmStep()
         end
 
         if ModulePoolLoaded and QuestState.Mob and parsed and not SameMob(parsed, QuestState.Mob) then
-            UpdateStatus("⚠ Чужой квест (" .. parsed .. " ≠ " .. QuestState.Mob .. ") — бросаю")
+            UpdateStatus("Wrong quest (" .. parsed .. " != " .. QuestState.Mob .. "), abandoning")
             pcall(function() CommF:InvokeServer("AbandonQuest") end)
             ResetQuestState()
             QuestState.LastTry = 0
@@ -1260,10 +1214,10 @@ local function QuestFarmStep()
         if mob then
             QuestState.Mob = mob
             HookMobs(mob)
-            UpdateStatus(("⚔ %s | моб: %s | %s"):format(quest.Name, mob, quest.Progress ~= "" and quest.Progress or "..."))
+            UpdateStatus(("Farm %s | mob: %s | %s"):format(quest.Name, mob, quest.Progress ~= "" and quest.Progress or "..."))
             FarmQuestMob(mob)
         else
-            UpdateStatus("🔎 Определяю моба из квеста: " .. quest.Name)
+            UpdateStatus("Detecting quest mob: " .. quest.Name)
             RebuildMobPool()
         end
         return
@@ -1277,13 +1231,13 @@ local function QuestFarmStep()
             return
         end
         ResetQuestState()
-        UpdateStatus("✅ Квест выполнен — ищу следующий")
+        UpdateStatus("Quest done, looking for next")
         return
     end
 
     if QuestState.Need and QuestKillCount >= QuestState.Need then
         ResetQuestState()
-        UpdateStatus("✅ Квест выполнен (счётчик убийств)")
+        UpdateStatus("Quest done by kill counter")
         return
     end
 
@@ -1297,17 +1251,17 @@ local function QuestFarmStep()
 
     local best = GetBestQuest()
     if not best then
-        UpdateStatus("⛔ Нет подходящего квеста (lvl " .. tostring(GetPlayerLevel() or "?") .. ")")
+        UpdateStatus("No suitable quest for level " .. tostring(GetPlayerLevel() or "?"))
         return
     end
 
-    UpdateStatus("📝 Иду за квестом: " .. tostring(best.NameQuest or best.NPC) .. " | моб: " .. tostring(best.Mob or "?"))
+    UpdateStatus("Going for quest: " .. tostring(best.NameQuest or best.NPC) .. " | mob: " .. tostring(best.Mob or "?"))
 
     local arrived, routeErr = TeleportToQuestNPC(best, 8)
     if not _G.Level then return end
 
     if routeErr == "no_entry" then
-        UpdateStatus("⏳ Не вошёл в каверну — ретрай через 2с")
+        UpdateStatus("Cavern entry failed, retry in 2s")
         return
     end
 
@@ -1317,7 +1271,7 @@ local function QuestFarmStep()
     if taken then
         local parsed = GetQuestMob(taken)
         if best.Mob and parsed and not SameMob(parsed, best.Mob) then
-            UpdateStatus("⚠ Взят не тот квест (" .. parsed .. " вместо " .. best.Mob .. ") — бросаю")
+            UpdateStatus("Wrong quest taken (" .. parsed .. " instead of " .. best.Mob .. "), abandoning")
             pcall(function() CommF:InvokeServer("AbandonQuest") end)
             ResetQuestState()
             QuestState.LastTry = 0
@@ -1330,14 +1284,14 @@ local function QuestFarmStep()
         CompleteStallSince = nil
         QuestState.Mob = best.Mob or parsed
         QuestState.DeepFish = IsDeepFishmanQuest(best)
-        UpdateStatus("✅ Квест взят: " .. taken.Name
-            .. " | моб: " .. tostring(QuestState.Mob)
+        UpdateStatus("Quest taken: " .. taken.Name
+            .. " | mob: " .. tostring(QuestState.Mob)
             .. (QuestState.DeepFish and " [underwater]" or ""))
     else
         if arrived then
-            UpdateStatus("⏳ Трекер не показал квест — фарм: " .. tostring(best.Mob or "?") .. " (повтор через " .. QUEST_GRACE .. "с)")
+            UpdateStatus("Tracker did not show quest, farming " .. tostring(best.Mob or "?") .. " (retry in " .. QUEST_GRACE .. "s)")
         else
-            UpdateStatus("⏳ Не доехал до NPC — повтор через " .. QUEST_GRACE .. "с")
+            UpdateStatus("Did not reach NPC, retry in " .. QUEST_GRACE .. "s")
         end
     end
 end
@@ -1350,11 +1304,6 @@ task.spawn(function()
     end
 end)
 
--- ═════════════════════════════════════════════════════════
---  🔧 ДОП. ФУНКЦИИ ИЗ КОНФИГА
--- ═════════════════════════════════════════════════════════
-
--- Auto Buy Random Fruit
 task.spawn(function()
     while task.wait(Sec) do
         if not CONFIG.AutoBuyRandomFruit then continue end
@@ -1366,7 +1315,6 @@ task.spawn(function()
     end
 end)
 
--- Auto Store Fruit
 local function UpdStFruit()
     local backpack = LocalPlayer:FindFirstChild("Backpack")
     if not backpack then return end
@@ -1388,10 +1336,6 @@ task.spawn(function()
         pcall(UpdStFruit)
     end
 end)
-
--- ═════════════════════════════════════════════════════════
---  📡 WEBHOOK (lvl + money + фрукты в инвентаре)
--- ═════════════════════════════════════════════════════════
 
 local function GetMoney()
     local v = nil
@@ -1415,7 +1359,6 @@ end
 local function GetFruitsList()
     local fruits = {}
     pcall(function()
-        -- в инвентаре (склад)
         if CommF then
             local inv = CommF:InvokeServer("getInventoryFruits")
             if type(inv) == "table" then
@@ -1428,7 +1371,6 @@ local function GetFruitsList()
         end
     end)
     pcall(function()
-        -- в рюкзаке/на персонаже
         local bp = LocalPlayer:FindFirstChild("Backpack")
         if bp then
             for _, t in pairs(bp:GetChildren()) do
@@ -1449,39 +1391,39 @@ local function GetFruitsList()
     return fruits
 end
 
-local WEBHOOK_INTERVAL = 300  -- раз в 5 минут
+local WEBHOOK_INTERVAL = 300
 local lastWebhook = 0
 local lastWebhookLvl = nil
 
 local function SendWebhook(reason)
     if not CONFIG.Webhook or CONFIG.WebhookURL == "" then return end
-    if not request and not (syn and syn.request) and not http_request then
-        warn("[OK Hub] ❌ request недоступен в экзекуторе — вебхук не отправлен")
+    local req = request or (syn and syn.request) or http_request
+    if not req then
+        warn("[OK Hub] request unavailable, webhook skipped")
         return
     end
 
     local lvl = GetPlayerLevel() or "?"
     local money = GetMoney()
     local fruits = GetFruitsList()
-    local fruitStr = (#fruits > 0) and table.concat(fruits, ", ") or "нет"
+    local fruitStr = (#fruits > 0) and table.concat(fruits, ", ") or "none"
 
     local payload = HttpService:JSONEncode({
         username = "OK Hub",
         embeds = {{
-            title = "📊 Статус аккаунта" .. (reason and (" — " .. reason) or ""),
+            title = "Account status" .. (reason and (" - " .. reason) or ""),
             color = 65280,
             fields = {
-                { name = "Игрок",        value = tostring(LocalPlayer.Name), inline = true },
-                { name = "Уровень",      value = tostring(lvl),              inline = true },
-                { name = "Деньги",       value = tostring(money),            inline = true },
-                { name = "Фрукты",       value = fruitStr,                   inline = false },
-                { name = "Сервер",       value = "job: " .. tostring(game.JobId), inline = false },
+                { name = "Player",  value = tostring(LocalPlayer.Name), inline = true },
+                { name = "Level",   value = tostring(lvl),              inline = true },
+                { name = "Money",   value = tostring(money),            inline = true },
+                { name = "Fruits",  value = fruitStr,                   inline = false },
+                { name = "Server",  value = "job: " .. tostring(game.JobId), inline = false },
             },
             footer = { text = "OK Hub • " .. os.date("%H:%M:%S") },
         }},
     })
 
-    local req = request or (syn and syn.request) or http_request
     pcall(function()
         req({
             Url = CONFIG.WebhookURL,
@@ -1493,8 +1435,8 @@ local function SendWebhook(reason)
 end
 
 task.spawn(function()
-    task.wait(20) -- первый отчёт после захода
-    SendWebhook("заход")
+    task.wait(20)
+    SendWebhook("joined")
     lastWebhook = tick()
     lastWebhookLvl = GetPlayerLevel()
     while true do
@@ -1502,18 +1444,13 @@ task.spawn(function()
         local lvl = GetPlayerLevel()
         local changed = lvl ~= lastWebhookLvl
         if (tick() - lastWebhook >= WEBHOOK_INTERVAL) or changed then
-            SendWebhook(changed and "левелап" or nil)
+            SendWebhook(changed and "level up" or nil)
             lastWebhook = tick()
             lastWebhookLvl = lvl
         end
     end
 end)
 
--- ═════════════════════════════════════════════════════════
---  ON-JOIN + ПОСТОЯННЫЕ ФУНКЦИИ
--- ═════════════════════════════════════════════════════════
-
--- Команда Пиратов
 task.spawn(function()
     local deadline = tick() + 60
     while tick() < deadline and not CommF do task.wait(0.5) end
@@ -1523,7 +1460,6 @@ task.spawn(function()
     end
 end)
 
--- Активация кодов
 task.spawn(function()
     task.wait(15)
     local codes = {
@@ -1555,10 +1491,9 @@ task.spawn(function()
             redeemed += 1
         end)
     end
-    print("[OK Hub] Коды активированы: " .. redeemed .. "/" .. #codes)
+    print("[OK Hub] Codes redeemed: " .. redeemed .. "/" .. #codes)
 end)
 
--- Hop при админе
 local function Hop()
     pcall(function()
         local servers
@@ -1599,7 +1534,7 @@ task.spawn(function()
                 local low = (v.Name or ""):lower()
                 for _, admin in ipairs(ADMIN_NAMES) do
                     if low == admin:lower() then
-                        UpdateStatus("🚨 Админ на сервере: " .. v.Name .. " — хоп!")
+                        UpdateStatus("Admin on server: " .. v.Name .. ", hopping")
                         lastHopTry = tick()
                         Hop()
                         return
@@ -1610,7 +1545,6 @@ task.spawn(function()
     end
 end)
 
--- Anti AFK
 task.spawn(function()
     repeat task.wait() until game:IsLoaded()
     LocalPlayer.Idled:Connect(function()
@@ -1622,7 +1556,6 @@ task.spawn(function()
     end)
 end)
 
--- Auto Buso
 task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
@@ -1635,18 +1568,16 @@ task.spawn(function()
     end
 end)
 
--- Auto buy Buso
 task.spawn(function()
     local deadline = tick() + 60
     while tick() < deadline and not CommF do task.wait(0.5) end
     if CommF then
         task.wait(5)
         pcall(function() CommF:InvokeServer("BuyHaki", "Buso") end)
-        print("[OK Hub] BuyHaki(Buso) отправлен")
+        print("[OK Hub] BuyHaki(Buso) sent")
     end
 end)
 
--- Автопрокачка Melee
 local pSats = 10
 
 local function statsSetings(Num, value)
@@ -1678,30 +1609,49 @@ task.spawn(function()
     end
 end)
 
--- Travel Sea 2 (Dressrosa), уровень 700+
-local ICE_DOOR_CF = CFrame.new(1347.7124, 37.3751602, -1325.6488)
+local sea2Stage = 0
 
 task.spawn(function()
     while task.wait(Sec) do
         pcall(function()
             TravelActive = false
-            if not _G.Level then return end
+            if not _G.Level then sea2Stage = 0 return end
             local lvl = GetPlayerLevel() or 0
-            if not (World1 and lvl >= 700) then return end
+            if not (World1 and lvl >= SEA2_MIN_LEVEL) then return end
             if not CommF then return end
             TravelActive = true
-
-            UpdateStatus("🌊 Sea 2: прохождение перехода")
 
             local door
             pcall(function() door = workspace.Map.Ice.Door end)
 
-            if door and door.CanCollide == true and door.Transparency == 0 then
-                CommF:InvokeServer("DressrosaQuestProgress", "Detective")
-                EquipWeapon("Key")
-                _tp(ICE_DOOR_CF)
+            local doorLocked = door and door.CanCollide == true and door.Transparency == 0
+
+            if doorLocked then
+                UpdateStatus("Sea 2: door locked, getting key")
+
+                if sea2Stage == 0 then
+                    pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
+                    sea2Stage = 1
+                elseif sea2Stage == 1 then
+                    _tp(SEA2_DOOR_CF)
+                    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if root and (root.Position - SEA2_DOOR_CF.Position).Magnitude <= 15 then
+                        sea2Stage = 2
+                    end
+                elseif sea2Stage == 2 then
+                    EquipWeapon("Key")
+                    pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
+                    task.wait(1)
+                    if door and not (door.CanCollide == true and door.Transparency == 0) then
+                        sea2Stage = 0
+                        UpdateStatus("Sea 2: door unlocked")
+                    end
+                end
 
             elseif door and door.CanCollide == false and door.Transparency == 1 then
+                sea2Stage = 0
+                UpdateStatus("Sea 2: killing Ice Admiral")
+
                 local adm = GetConnectionEnemies("Ice Admiral")
                 if adm and Attack.Alive(adm) then
                     Attack.Kill(adm, true)
@@ -1709,20 +1659,20 @@ task.spawn(function()
                     local en = workspace:FindFirstChild("Enemies")
                     local dead = en and en:FindFirstChild("Ice Admiral")
                     if dead and dead:FindFirstChildOfClass("Humanoid") and dead.Humanoid.Health <= 0 then
-                        CommF:InvokeServer("TravelDressrosa")
+                        pcall(function() CommF:InvokeServer("TravelDressrosa") end)
                     else
-                        _tp(ICE_DOOR_CF)
+                        _tp(SEA2_DOOR_CF)
                     end
                 end
 
             else
-                CommF:InvokeServer("TravelDressrosa")
+                sea2Stage = 0
+                pcall(function() CommF:InvokeServer("TravelDressrosa") end)
             end
         end)
     end
 end)
 
--- Travel Sea 3 (Zou), уровень 1500+
 local PLATES = {
     CFrame.new(-1850.49329, 13.1789551, 1750.89685),
     CFrame.new(-1858.87305, 19.3777466, 1712.01807),
@@ -1750,7 +1700,7 @@ task.spawn(function()
             ZouActive = false
             if not _G.Level then return end
             local lvl = GetPlayerLevel() or 0
-            if not (World2 and lvl >= 1500) then return end
+            if not (World2 and lvl >= SEA2_TRAVEL_MIN) then return end
             if not CommF then return end
             ZouActive = true
 
@@ -1868,7 +1818,6 @@ task.spawn(function()
     end
 end)
 
--- ==================== HOOKS ====================
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     pcall(function() block.CFrame = LocalPlayer.Character.PrimaryPart.CFrame end)
@@ -1877,6 +1826,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     UWRouteBusy = false
     EntHighlight, EntBillboard = nil, nil
     CompleteStallSince = nil
+    sea2Stage = 0
     ResetQuestState()
     plateIndex = 1
     table.clear(DamageConfirmed)
@@ -1888,6 +1838,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     table.clear(HitOrder)
 end)
 
-print("[OK Hub] Config Edition loaded — AutoFarm: " .. tostring(CONFIG.AutoFarm)
+print("[OK Hub] Config Edition loaded | AutoFarm: " .. tostring(CONFIG.AutoFarm)
     .. " | Fruits: " .. tostring(CONFIG.AutoBuyRandomFruit) .. "/" .. tostring(CONFIG.AutoStoreFruit)
     .. " | Webhook: " .. tostring(CONFIG.Webhook))
