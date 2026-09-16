@@ -1,1260 +1,984 @@
 repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer
 
-local cfg = getgenv().FROZENT0_CONFIG or {}
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
-local function CfgBool(key, default)
-    if type(cfg[key]) == "boolean" then return cfg[key] end
-    return default
-end
-
-local CONFIG = {
-    AutoFarm           = CfgBool("AutoFarm", true),
-    Webhook            = CfgBool("Webhook", true),
-    WebhookURL         = (type(cfg.WebhookURL) == "string" and cfg.WebhookURL) or "",
-    QueueOnTeleport    = CfgBool("QueueOnTeleport", true),
-    AutoBuyRandomFruit = CfgBool("AutoBuyRandomFruit", true),
-    AutoStoreFruit     = CfgBool("AutoStoreFruit", true),
-    AllowedSea3Fruits  = (type(cfg.AllowedSea3Fruits) == "table" and cfg.AllowedSea3Fruits)
-        or {
-            "Quake-Quake",
-            "Love-Love",
-            "Creation-Creation",
-            "Spider-Spider",
-            "Light-Light",
-            "Sound-Sound",
-            "Phoenix-Phoenix",
-            "Pain-Pain",
-            "Blizzard-Blizzard",
-            "Gravity-Gravity",
-            "Mammoth-Mammoth",
-        },
+local Config = {
+    AutoFarm = false,
+    FarmMethod = "Melee",
+    FruitSkills = { Z = true, X = false, C = false, V = false, F = false },
+    LevelRange = false,
+    MinLevel = 1,
+    MaxLevel = 2800,
+    AutoStats = false,
+    AutoStat = { Melee = true, Defense = false, Sword = false, Gun = false, Fruit = false },
+    AutoBuyGacha = false,
+    TweenServerFruit = false,
+    TweenFruit = { Rocket = true },
+    FruitHop = false,
 }
 
-local Players           = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService      = game:GetService("TweenService")
-local RunService        = game:GetService("RunService")
-local VirtualUser       = game:GetService("VirtualUser")
-local HttpService       = game:GetService("HttpService")
-local TeleportService   = game:GetService("TeleportService")
+local STAT_MAX = 2800
+local GACHA_INTERVAL = 30
 
-local LocalPlayer = Players.LocalPlayer
-local replicated  = ReplicatedStorage
+local SetAutoFarm, SetFarmMethod, SetAutoStats, SetFruitHop
 
-local World1 = game.PlaceId == 2753915549 or game.PlaceId == 85211729168715
-local World2 = game.PlaceId == 4442272183 or game.PlaceId == 79091703265657
-local World3 = game.PlaceId == 7449423635 or game.PlaceId == 100117331123089
+local Window = WindUI:CreateWindow({
+    Title = "Blox Fruits Hub",
+    Icon = "rbxassetid://10734950309",
+    Author = "WindUI",
+    Folder = "BloxFruitsHub",
+    Size = UDim2.fromOffset(580, 460),
+    Transparent = true,
+    Theme = "Dark",
+    Resizable = true,
+    SideBarWidth = 180,
+})
 
-_G.SelectWeapon = "Melee"
-_G.ChooseWP     = "Melee"
-_G.Level        = CONFIG.AutoFarm
-_G.Auto_Melee   = true
-_B              = true
+local AutoFarmTab = Window:Tab({ Title = "Auto Farm", Icon = "swords" })
 
-local Sec         = 0.06
-local shouldTween = false
-local OnFarm      = false
+AutoFarmTab:Section({ Title = "Auto Farm" })
+AutoFarmTab:Toggle({
+    Title = "Auto Farm",
+    Desc = "Automatically farms selected targets",
+    Value = Config.AutoFarm,
+    Callback = function(Value)
+        Config.AutoFarm = Value
+        if SetAutoFarm then SetAutoFarm(Value) end
+        print("[AutoFarm]", Value)
+    end,
+})
+AutoFarmTab:Dropdown({
+    Title = "Farm Method",
+    Desc = "Select the weapon type used for farming",
+    Values = { "Melee", "Sword", "Gun", "Fruit" },
+    Value = Config.FarmMethod,
+    Callback = function(Value)
+        Config.FarmMethod = Value
+        if SetFarmMethod then SetFarmMethod(Value) end
+        print("[Farm Method]", Value)
+    end,
+})
 
-pcall(function()
-    if replaceclosure and newcclosure and checkcaller and getinfo then
-        local old_coroutine_wrap
-        old_coroutine_wrap = replaceclosure(coroutine.wrap, newcclosure(function(func, ...)
-            if not checkcaller() then
-                local ok, caller_info = pcall(getinfo, 5, "f")
-                if ok and caller_info and caller_info.func == pcall then
-                    return coroutine.yield()
-                end
-            end
-            return old_coroutine_wrap(func, ...)
-        end))
-        print("[Frozent0] Anticheat bypass: on")
-    end
-end)
-
-pcall(function()
-    if hookmetamethod and checkcaller and getnamecallmethod then
-        local OldNameCall
-        OldNameCall = hookmetamethod(game, "__namecall", function(Self, ...)
-            local Args = {...}
-            local NamecallMethod = getnamecallmethod()
-            if not checkcaller() and NamecallMethod == "FireServer" then
-                if #Args == 2 and type(Args[1]) == "number" and Args[2] == false then
-                    return
-                end
-            end
-            return OldNameCall(Self, ...)
-        end)
-        print("[Frozent0] Nofall: on")
-    end
-end)
-
-if CONFIG.QueueOnTeleport then
-    local qfn = queue_on_teleport
-        or (syn and syn.queue_on_teleport)
-        or (fluxus and fluxus.queue_on_teleport)
-        or (getgenv().queue_on_teleport)
-
-    if qfn then
-        local function SerializeConfig(t)
-            local parts = {}
-            for k, v in pairs(t) do
-                if type(v) == "boolean" then
-                    table.insert(parts, k .. " = " .. tostring(v))
-                elseif type(v) == "number" then
-                    table.insert(parts, k .. " = " .. tostring(v))
-                elseif type(v) == "string" then
-                    table.insert(parts, k .. ' = "' .. tostring(v):gsub('\\', '\\\\'):gsub('"', '\\"') .. '"')
-                elseif type(v) == "table" then
-                    local inner = {}
-                    for _, item in ipairs(v) do
-                        if type(item) == "string" then
-                            table.insert(inner, '"' .. tostring(item):gsub('\\', '\\\\'):gsub('"', '\\"') .. '"')
-                        else
-                            table.insert(inner, tostring(item))
-                        end
-                    end
-                    table.insert(parts, k .. " = { " .. table.concat(inner, ", ") .. " }")
-                end
-            end
-            return "{ " .. table.concat(parts, ", ") .. " }"
+AutoFarmTab:Section({ Title = "Fruit Skills" })
+AutoFarmTab:Dropdown({
+    Title = "Fruit Skills to Use",
+    Desc = "Select which Fruit skills Auto Farm can use",
+    Values = { "Z", "X", "C", "V", "F" },
+    Multi = true,
+    Value = { "Z" },
+    Callback = function(Values)
+        Config.FruitSkills = { Z = false, X = false, C = false, V = false, F = false }
+        for _, Skill in ipairs(Values) do
+            Config.FruitSkills[Skill] = true
         end
+    end,
+})
 
-        local self_src = "getgenv().FROZENT0_CONFIG = " .. SerializeConfig(cfg)
-            .. "\n\nloadstring(game:HttpGet('https://raw.githubusercontent.com/Revenge-Hub-Roblox/Commissions/refs/heads/main/com23'))()"
-
-        pcall(function() qfn(self_src) end)
-        print("[Frozent0] QueueOnTeleport: on")
-    else
-        warn("[Frozent0] queue_on_teleport not available in this executor")
-    end
-end
-
-local MOVE_SPEED = 200
-
-local QUEST_GRACE        = 12
-local QUEST_CONFIRM_WAIT = 6
-local GUI_LAG            = 1.5
-local SETTLE_RANGE       = 15
-
-local WD_TICK        = 0.4
-local WD_ARRIVE_DIST = 30
-local WD_STUCK_DIST  = 1.5
-local WD_STUCK_TIME  = 1.2
-
-local COMPLETE_STALL = 3
-
-local BRING_TEST_INTERVAL = 0.4
-local BRING_MAX_FAILS     = 3
-
-local PHANTOM_TIME         = 5
-local PHANTOM_RELEASE_WAIT = 2
-
-local UW_X             = 50000
-local UW_ENTER         = Vector3.new(4050.31, -3, -1814.12)
-local UW_CITY_EXIT     = Vector3.new(61170.05, -3, 1952.83)
-local UW_OUT           = Vector3.new(4050, 30, -1814)
-local UW_QUESTSPOT     = Vector3.new(61122, 25, 1569)
-local UW_REMOTE_EVERY  = 1.5
-local UW_MAX_TIME      = 60
-local UW_ARRIVE_RADIUS = 60
-
-local SEA2_MIN_LEVEL   = 700
-local SEA2_DOOR_CF     = CFrame.new(1288.73328, 35.8959961, -1361.06274, -0.70963943, 0, -0.704565167, 0, 1, 0, 0.704565167, 0, -0.70963943)
-local SEA3_MIN_LEVEL   = 1501
-
-local SEA3_FRUIT_HOP_DELAY   = 20
-local SEA3_FRUIT_PICK_RADIUS = 12
-
-local NO_BRING_MOBS = {
-    ["Factory Staff"] = true,
-}
-
-local REMOTE_CACHE_TTL = 3
-local QUEST_CACHE_TTL  = 0.3
-
-local UWRouteBusy = false
-
-local QUEST_GIVERS = {}
-
-local QuestState = {
-    Mob       = nil,
-    Need      = nil,
-    LastSeen  = 0,
-    TakenAt   = 0,
-    LastTry   = 0,
-    Confirmed = false,
-    DeepFish  = nil,
-}
-local QuestKillCount     = 0
-local CompleteStallSince = nil
-local hooked             = {}
-local TravelActive       = false
-local ZouActive          = false
-local Sea2Mode           = false
-
-local DamageConfirmed = {}
-local DamageHP        = {}
-local DamageHPLast    = {}
-local BringFails      = {}
-local BringLastChk    = {}
-local BringStuck      = {}
-local NoBring         = {}
-local HitOrder        = {}
-local PhantomBlocked  = {}
-
-local lastStatus = ""
-
-local function UpdateStatus(t)
-    if t == lastStatus then return end
-    lastStatus = t
-    print("[Frozent0] " .. t)
-end
-
-local function CleanupMobTables(m)
-    DamageConfirmed[m] = nil
-    DamageHP[m]        = nil
-    DamageHPLast[m]    = nil
-    BringFails[m]      = nil
-    BringLastChk[m]    = nil
-    BringStuck[m]      = nil
-    NoBring[m]         = nil
-    HitOrder[m]        = nil
-    PhantomBlocked[m]  = nil
-end
-
-local function PhantomRelease(m)
-    local root = m:FindFirstChild("HumanoidRootPart")
-    local hum = m:FindFirstChildOfClass("Humanoid")
-    pcall(function()
-        local bv = root and root:FindFirstChild("BodyVelocity")
-        if bv then bv:Destroy() end
-        if hum then
-            hum.WalkSpeed = 16
-            hum.JumpPower = 50
+AutoFarmTab:Section({ Title = "Level Range" })
+AutoFarmTab:Toggle({
+    Title = "Level Range",
+    Desc = "Stop farm when level reaches Max Lvl",
+    Value = Config.LevelRange,
+    Callback = function(Value) Config.LevelRange = Value end,
+})
+AutoFarmTab:Input({
+    Title = "Min Lvl",
+    Desc = "Floor level",
+    Value = tostring(Config.MinLevel),
+    Placeholder = "1",
+    ClearTextOnFocus = false,
+    Callback = function(Value)
+        local n = tonumber(Value)
+        if n then Config.MinLevel = n end
+    end,
+})
+AutoFarmTab:Input({
+    Title = "Max Lvl",
+    Desc = "Always stops Auto Farm at this level",
+    Value = tostring(Config.MaxLevel),
+    Placeholder = "2800",
+    ClearTextOnFocus = false,
+    Callback = function(Value)
+        local n = tonumber(Value)
+        if n then
+            Config.MaxLevel = n
+            print("[MaxLevel]", n)
         end
-        if root then root.CanCollide = true end
-    end)
-    DamageConfirmed[m] = nil
-    DamageHP[m]        = nil
-    DamageHPLast[m]    = nil
-    BringFails[m]      = nil
-    BringLastChk[m]    = nil
-    BringStuck[m]      = true
-    NoBring[m]         = true
-    HitOrder[m]        = nil
-    PhantomBlocked[m]  = tick() + PHANTOM_RELEASE_WAIT
-    UpdateStatus("Phantom mob detected (" .. m.Name .. "), releasing for " .. PHANTOM_RELEASE_WAIT .. "s")
+    end,
+})
+
+AutoFarmTab:Section({ Title = "Auto Stats" })
+AutoFarmTab:Toggle({
+    Title = "Auto Stats",
+    Desc = "Automatically spends available stat points",
+    Value = Config.AutoStats,
+    Callback = function(Value)
+        Config.AutoStats = Value
+        if SetAutoStats then SetAutoStats(Value) end
+        print("[AutoStats]", Value)
+    end,
+})
+AutoFarmTab:Dropdown({
+    Title = "Auto Stats",
+    Desc = "Select which stats receive points",
+    Values = { "Melee", "Defense", "Sword", "Gun", "Fruit" },
+    Multi = true,
+    Value = { "Melee" },
+    Callback = function(Values)
+        Config.AutoStat = { Melee = false, Defense = false, Sword = false, Gun = false, Fruit = false }
+        for _, Stat in ipairs(Values) do
+            Config.AutoStat[Stat] = true
+        end
+    end,
+})
+
+AutoFarmTab:Section({ Title = "Fruit Sniper" })
+AutoFarmTab:Toggle({
+    Title = "Auto buy fruit from Gacha",
+    Desc = "Purchase ZiolesGacha every 30 seconds",
+    Value = Config.AutoBuyGacha,
+    Callback = function(Value) Config.AutoBuyGacha = Value end,
+})
+AutoFarmTab:Toggle({
+    Title = "Tween for Fruits if on Server",
+    Desc = "Tween to the selected fruit when it exists on the current server",
+    Value = Config.TweenServerFruit,
+    Callback = function(Value) Config.TweenServerFruit = Value end,
+})
+AutoFarmTab:Dropdown({
+    Title = "Fruit to Tween",
+    Desc = "Select the fruits to search for",
+    Values = {
+        "Rocket", "Spin", "Blade", "Spring", "Bomb", "Smoke", "Spike", "Flame",
+        "Ice", "Sand", "Dark", "Eagle", "Diamond", "Light", "Rubber", "Ghost",
+        "Magma", "Quake", "Buddha", "Love", "Creation", "Spider", "Sound", "Phoenix",
+        "Portal", "Lightning", "Pain", "Blizzard", "Gravity", "Mammoth", "T-Rex",
+        "Dough", "Shadow", "Venom", "Gas", "Spirit", "Tiger", "Yeti", "Magnet",
+        "Kitsune", "Control", "Dragon",
+    },
+    Multi = true,
+    Value = { "Rocket" },
+    Callback = function(Values)
+        Config.TweenFruit = {}
+        for _, Fruit in ipairs(Values) do
+            Config.TweenFruit[Fruit] = true
+        end
+    end,
+})
+AutoFarmTab:Toggle({
+    Title = "Hop for Fruit Sniping",
+    Desc = "Hop servers when the selected fruit is not found",
+    Value = Config.FruitHop,
+    Callback = function(Value)
+        Config.FruitHop = Value
+        if SetFruitHop then SetFruitHop(Value) end
+    end,
+})
+
+local hub = {
+    core = {},
+    vars = {
+        FireInterval = 0.35,
+        SelectWeapon = "Black Leg",
+        TweenSpeed = 300,
+        QuestMoveSpeed = 200,
+        AttackY = 12,
+        FruitAttackY = 10,
+        SettleRange = 15,
+        FarmEnabled = false,
+        FruitEnabled = true,
+        FruitMinValueHop = 1_000_000,
+        FruitBusy = false,
+        FruitScanInterval = 1.5,
+        _LastFruitScan = 0,
+        _LastHop = 0,
+        _LastQuestTry = 0,
+        _FruitSkillsReady = 0,
+        Tweening = false,
+        SkillDelay = 0.25,
+    },
+}
+
+local core, vars = hub.core, hub.vars
+
+function core.missing(func_Type, func, fallback)
+    if type(func) == func_Type then return func end
+    return fallback
 end
 
-local block = Instance.new("Part")
-block.Name = "FarmBlock"
-block.Size = Vector3.new(2, 2, 2)
-block.Anchored = true
-block.CanCollide = false
-block.Transparency = 1
-block.Parent = workspace
+cloneref = core.missing("function", cloneref, function(...) return ... end)
+queueteleport = core.missing("function", queue_on_teleport or (syn and syn.queue_on_teleport))
+request = core.missing("function", request or http_request or (http and http.request) or (syn and syn.request))
 
+function core.getService(name)
+    return cloneref(game:GetService(name))
+end
+
+local players_Service = core.getService("Players")
+local replicatedstorage_Service = core.getService("ReplicatedStorage")
+local run_Service = core.getService("RunService")
+local teleport_Service = core.getService("TeleportService")
+local http_Service = core.getService("HttpService")
+local tween_Service = core.getService("TweenService")
+local vim_Service = core.getService("VirtualInputManager")
+local virtual_User = core.getService("VirtualUser")
+
+local player = players_Service.LocalPlayer
+local character, humanoid, humanoidRootPart, backpack
+local LastFire = 0
+local QUEST_MOVE_SPEED = 200
 local activeTween, activeTarget = nil, nil
+local shouldTween = true
+local UW_X = 50000
+local UW_ENTER = Vector3.new(4050.31, -3, -1814.12)
+local UW_CITY_EXIT = Vector3.new(61170.05, -3, 1952.83)
+local UW_OUT = Vector3.new(4050, 30, -1814)
+local UW_QUESTSPOT = Vector3.new(61122, 25, 1569)
+local UW_REMOTE_EVERY = 1.5
+local UW_MAX_TIME = 60
+local UW_ARRIVE_RADIUS = 60
+local UWRouteBusy = false
+local CurrentTarget = nil
+local idk = nil
+local prefix = "[LOG] "
+local SEA1_PLACE = 2753915549
+local SEA2_PLACE = 4442272183
+local SEA3_PLACE = 7449423635
 
-local FOLLOW_DIST     = 25
-local RESYNC_DEBOUNCE = 0.15
-local lastResync      = 0
+character = player.Character or player.CharacterAdded:Wait()
+humanoid = character:WaitForChild("Humanoid", 10)
+humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
+backpack = player:WaitForChild("Backpack", 10)
 
-task.spawn(function()
-    repeat task.wait() until LocalPlayer.Character and LocalPlayer.Character.PrimaryPart
-    block.CFrame = LocalPlayer.Character.PrimaryPart.CFrame
-    while true do
-        task.wait()
-        pcall(function()
-            if OnFarm and block.Parent then
-                local root = LocalPlayer.Character and LocalPlayer.Character.PrimaryPart
-                if root then
-                    local d = (root.Position - block.Position).Magnitude
-                    if d <= FOLLOW_DIST then
-                        root.CFrame = block.CFrame
-                    elseif d <= 400 then
-                        local now = tick()
-                        if now - lastResync >= RESYNC_DEBOUNCE then
-                            lastResync = now
-                            if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
-                                activeTween:Cancel()
-                            end
-                            block.CFrame = root.CFrame
-                            if activeTarget then
-                                _tp(activeTarget, true)
-                            end
-                        end
-                    else
-                        block.CFrame = root.CFrame
-                    end
-                end
-                for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
-                    if part:IsA("BasePart") then part.CanCollide = false end
-                end
-            end
-        end)
-    end
-end)
+local networkM = require(replicatedstorage_Service:WaitForChild("Modules"):WaitForChild("Net"))
+local questsM = require(replicatedstorage_Service:WaitForChild("Quests"))
+local guideM = require(replicatedstorage_Service:WaitForChild("GuideModule"))
 
-task.spawn(function()
-    while task.wait() do
-        pcall(function()
-            local farming = _G.Level
-            OnFarm = farming
-            shouldTween = farming
-            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if farming and hrp then
-                if not hrp:FindFirstChild("BodyClip") then
-                    local bv = Instance.new("BodyVelocity")
-                    bv.Name = "BodyClip"
-                    bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-                    bv.Velocity = Vector3.zero
-                    bv.Parent = hrp
-                end
-            elseif hrp then
-                local clip = hrp:FindFirstChild("BodyClip")
-                if clip then clip:Destroy() end
-            end
-        end)
-    end
-end)
+local xuynia_RF = replicatedstorage_Service:WaitForChild("Remotes"):WaitForChild("CommF_")
+local attack_RE = networkM:RemoteEvent("RegisterAttack")
+local registerHit_RE = networkM:RemoteEvent("RegisterHit")
+local questUpdate_RE = replicatedstorage_Service:WaitForChild("Remotes"):WaitForChild("QuestUpdate")
+local ActiveQuest = guideM.Data and guideM.Data.QuestData or nil
+local data_DIR = player:FindFirstChild("Data")
 
-task.spawn(function()
-    while task.wait(0.2) do
-        pcall(function()
-            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Sit == true then
-                hum.Sit = false
-                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if root then
-                    root.Velocity = Vector3.new(root.Velocity.X, 20, root.Velocity.Z)
-                end
-            end
-        end)
-    end
-end)
+local quest_blacklist = {
+    MarineQuest = true,
+    BartiloQuest = true,
+    CitizenQuest = true,
+    Trainees = true,
+}
 
-_tp = function(cf, force)
-    if typeof(cf) == "Vector3" then cf = CFrame.new(cf) end
-    if typeof(cf) ~= "CFrame" then return end
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+local fruit_price_data = {
+    ["Rocket-Rocket"] = 5000, ["Spin-Spin"] = 7500, ["Chop-Chop"] = 30000,
+    ["Spring-Spring"] = 60000, ["Bomb-Bomb"] = 80000, ["Smoke-Smoke"] = 100000,
+    ["Spike-Spike"] = 180000, ["Flame-Flame"] = 250000, ["Falcon-Falcon"] = 300000,
+    ["Ice-Ice"] = 350000, ["Sand-Sand"] = 420000, ["Dark-Dark"] = 500000,
+    ["Diamond-Diamond"] = 600000, ["Light-Light"] = 650000, ["Rubber-Rubber"] = 750000,
+    ["Barrier-Barrier"] = 800000, ["Ghost-Ghost"] = 950000, ["Magma-Magma"] = 1300000,
+    ["Quake-Quake"] = 1000000, ["Buddha-Buddha"] = 1200000, ["Love-Love"] = 1500000,
+    ["Spider-Spider"] = 1500000, ["Sound-Sound"] = 1700000, ["Phoenix-Phoenix"] = 1800000,
+    ["Portal-Portal"] = 1900000, ["Rumble-Rumble"] = 2100000, ["Lightning-Lightning"] = 2100000,
+    ["Pain-Pain"] = 2300000, ["Blizzard-Blizzard"] = 2400000, ["Gravity-Gravity"] = 2500000,
+    ["Mammoth-Mammoth"] = 2700000, ["T-Rex-T-Rex"] = 2700000, ["Dough-Dough"] = 2800000,
+    ["Shadow-Shadow"] = 2900000, ["Venom-Venom"] = 3000000, ["Control-Control"] = 3200000,
+    ["Gas-Gas"] = 3200000, ["Spirit-Spirit"] = 3400000, ["Dragon-Dragon"] = 3500000,
+    ["Leopard-Leopard"] = 5000000, ["Tiger-Tiger"] = 5000000, ["Yeti-Yeti"] = 5000000,
+    ["Kitsune-Kitsune"] = 8000000, ["Creation-Creation"] = 3000000,
+}
 
-    if not force and activeTween
-        and activeTween.PlaybackState == Enum.PlaybackState.Playing
-        and activeTarget and (activeTarget.Position - cf.Position).Magnitude < 2 then
-        return
-    end
+local weapon_lists = {
+    Melee = {
+        "Combat", "Black Leg", "Electric", "Death Step", "Sharkman Karate",
+        "Electric Claw", "Dragon Talon", "Superhuman", "Godhuman", "Sanguine Art",
+    },
+    Sword = {
+        "Katana", "Iron Mace", "Dual Katana", "Bisento", "Pirate Blade", "Saber",
+        "Saber V2", "Silver Blade", "Midnight Blade", "Shark Saw", "Dark Blade",
+        "Falchion", "Rengoku", "Buddy Sword", "Canvander", "Twin Hooks",
+        "Spikey Trident", "Pipe", "Yama", "Tushita", "Shisui", "Saddi", "Wando",
+        "Cursed Dual Katana", "True Triple Katana",
+    },
+    Gun = {
+        "Slingshot", "Flintlock", "Musket", "Refined Slingshot", "Refined Flintlock",
+        "Refined Musket", "Bizarre Rifle", "Cannon", "Kabucha", "Acidum Rifle",
+        "Serpent Bow", "Soul Guitar",
+    },
+}
 
-    if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
-        activeTween:Cancel()
-    end
-
-    block.CFrame = root.CFrame
-
-    local dist = (cf.Position - block.Position).Magnitude
-    local time = math.max(dist / MOVE_SPEED, 0.05)
-
-    activeTarget = cf
-    local tw = TweenService:Create(block, TweenInfo.new(time, Enum.EasingStyle.Linear), { CFrame = cf })
-    activeTween = tw
-    tw:Play()
-    task.spawn(function()
-        while tw and tw.PlaybackState == Enum.PlaybackState.Playing do
-            if not shouldTween then tw:Cancel() break end
-            task.wait()
-        end
-    end)
+function core.log(msg, isError)
+    if isError then warn(prefix .. tostring(msg)) else print(prefix .. tostring(msg)) end
 end
 
-local wdLastBlockPos, wdStuckTime = nil, 0
-
-task.spawn(function()
-    while task.wait(WD_TICK) do
-        if not OnFarm then
-            wdLastBlockPos, wdStuckTime = nil, 0
-            continue
-        end
-
-        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not root or not activeTarget then
-            wdLastBlockPos, wdStuckTime = nil, 0
-            continue
-        end
-
-        if (root.Position - activeTarget.Position).Magnitude <= WD_ARRIVE_DIST then
-            wdLastBlockPos, wdStuckTime = nil, 0
-            continue
-        end
-
-        local playing = activeTween ~= nil
-            and activeTween.PlaybackState == Enum.PlaybackState.Playing
-
-        if not playing then
-            pcall(function() _tp(activeTarget) end)
-            wdLastBlockPos, wdStuckTime = nil, 0
-        else
-            local bp = block.Position
-            if wdLastBlockPos and (bp - wdLastBlockPos).Magnitude < WD_STUCK_DIST then
-                wdStuckTime += WD_TICK
-                if wdStuckTime >= WD_STUCK_TIME then
-                    pcall(function() _tp(activeTarget, true) end)
-                    wdStuckTime = 0
-                end
-            else
-                wdStuckTime = 0
-            end
-            wdLastBlockPos = bp
-        end
-    end
-end)
-
-notween = function(cf)
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if root and cf then
-        pcall(function() root.CFrame = cf end)
-    end
+function core.IsAlive(mob)
+    if typeof(mob) ~= "Instance" then return false end
+    local h = mob:FindFirstChildOfClass("Humanoid")
+    return h and h.Health > 0
 end
 
-local function EquipWeapon(name)
-    if not name then return end
-    local tool = LocalPlayer.Backpack:FindFirstChild(name) or LocalPlayer.Character:FindFirstChild(name)
-    if tool then
-        pcall(function() LocalPlayer.Character.Humanoid:EquipTool(tool) end)
-    end
-end
-
-task.spawn(function()
-    while task.wait(0.3) do
-        pcall(function()
-            for _, v in pairs(LocalPlayer.Backpack:GetChildren()) do
-                if v:IsA("Tool") and v.ToolTip == _G.ChooseWP then
-                    _G.SelectWeapon = v.Name
-                    break
-                end
+function core.getBestWeapon(method)
+    local list = weapon_lists[method]
+    if not list then return vars.SelectWeapon end
+    for _, bag in ipairs({ character, backpack }) do
+        if bag then
+            for _, name in ipairs(list) do
+                local t = bag:FindFirstChild(name)
+                if t and t:IsA("Tool") then return name end
             end
-        end)
-    end
-end)
-
-task.spawn(function()
-    if not sethiddenproperty then
-        warn("[Frozent0] sethiddenproperty unavailable, bring will be partial")
-        return
-    end
-    RunService.Stepped:Connect(function()
-        if not OnFarm then return end
-        pcall(function()
-            sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", 9e9)
-            sethiddenproperty(LocalPlayer, "SimulationRadius", 9e9)
-        end)
-    end)
-end)
-
-local function ReleaseMob(v, hum, root)
-    NoBring[v] = true
-    BringStuck[v] = true
-    pcall(function()
-        local bv = root:FindFirstChild("BodyVelocity")
-        if bv then bv:Destroy() end
-        if hum then
-            hum.WalkSpeed = 16
-            hum.JumpPower = 50
         end
-        root.CanCollide = true
-    end)
+    end
+    return vars.SelectWeapon
 end
 
-local function BringEnemy(Mon)
-    if not _B or not Mon or not Mon:FindFirstChild("HumanoidRootPart") then return end
-    if NO_BRING_MOBS[Mon.Name] then return end
-    pcall(function()
-        if sethiddenproperty then
-            sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", 9e9)
-            sethiddenproperty(LocalPlayer, "SimulationRadius", 9e9)
-        end
+function core.equipWeapon(weaponName)
+    if not character or not humanoid then return false end
+    local name = weaponName
+    if typeof(weaponName) == "Instance" then
+        name = weaponName.Name
+    elseif typeof(weaponName) ~= "string" or weaponName == "" then
+        return false
+    end
+    if character:FindFirstChild(name) and character[name]:IsA("Tool") then return true end
+    local tool = backpack and backpack:FindFirstChild(name)
+    if not tool or not tool:IsA("Tool") then return false end
+    pcall(function() humanoid:EquipTool(tool) end)
+    if not character:FindFirstChild(name) then tool.Parent = character end
+    return character:FindFirstChild(name) ~= nil
+end
 
-        local targetPos = Mon.HumanoidRootPart.Position
-        local enemies = workspace:FindFirstChild("Enemies")
-        if not enemies then return end
+function core.HasHaki()
+    if not character then return false end
+    local ok, tagged = pcall(function() return character:HasTag("Buso") end)
+    return ok and tagged == true
+end
 
-        for _, v in pairs(enemies:GetChildren()) do
-            if v ~= Mon and v.Name == Mon.Name
-                and not NoBring[v] and DamageConfirmed[v] and not PhantomBlocked[v]
-                and not NO_BRING_MOBS[v.Name] then
-                local hum  = v:FindFirstChildOfClass("Humanoid")
-                local root = v:FindFirstChild("HumanoidRootPart")
-                if hum and root and hum.Health > 0 then
-                    local dist = (root.Position - targetPos).Magnitude
-                    if dist <= 5000 then
-                        if dist > 15 then
-                            root.CFrame = CFrame.new(targetPos)
-                            root.AssemblyLinearVelocity = Vector3.zero
-                            root.AssemblyAngularVelocity = Vector3.zero
+function core.BuyHaki()
+    return pcall(function() xuynia_RF:InvokeServer("BuyHaki", "Buso") end)
+end
 
-                            local now = tick()
-                            if now - (BringLastChk[v] or 0) >= BRING_TEST_INTERVAL then
-                                BringLastChk[v] = now
-                                local fails = (BringFails[v] or 0) + 1
-                                BringFails[v] = fails
-                                if fails >= BRING_MAX_FAILS then
-                                    ReleaseMob(v, hum, root)
-                                end
-                            end
-                        else
-                            BringFails[v]   = nil
-                            BringLastChk[v] = nil
-                            BringStuck[v]   = nil
-                        end
+function core.activateHaki()
+    if not character then return false end
+    if not core.HasHaki() then core.BuyHaki() end
+    if character:FindFirstChild("HasBuso") then return true end
+    return pcall(function() xuynia_RF:InvokeServer("Buso") end)
+end
 
-                        root.CanCollide = false
-                        hum.WalkSpeed = 0
-                        hum.JumpPower = 0
+function core.findOwnedFruitTool(id)
+    for _, bag in ipairs({ character, backpack }) do
+        if bag then
+            for _, t in ipairs(bag:GetChildren()) do
+                if t:IsA("Tool") then
+                    if id and t:GetAttribute("OriginalName") == id then return t end
+                    if (t:FindFirstChild("EatRemote", true) or t:GetAttribute("OriginalName")) and not id then
+                        return t
                     end
                 end
             end
         end
-
-        Mon.HumanoidRootPart.CanCollide = false
-        Mon.Humanoid.WalkSpeed = 0
-        Mon.Humanoid.JumpPower = 0
-    end)
-end
-
-local Attack = {}
-
-Attack.Alive = function(m)
-    return m and m.Parent and m:FindFirstChild("Humanoid") and m.Humanoid.Health > 0
-end
-
-Attack.Kill = function(model, active)
-    if not active or not Attack.Alive(model) then return end
-    local hrp = model:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    if not PhantomBlocked[model] then
-        BringEnemy(model)
     end
-
-    EquipWeapon(_G.SelectWeapon)
-    local tip = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-    local isFruit = tip and tip.ToolTip == "Blox Fruit"
-
-    local targetCF = hrp.CFrame * CFrame.new(0, isFruit and 10 or 24, 0)
-
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if root
-        and (root.Position - targetCF.Position).Magnitude <= 6
-        and (block.Position - targetCF.Position).Magnitude <= 6 then
-        return
-    end
-
-    _tp(targetCF)
-end
-
-local ATTACK_CHUNK = 2
-local MAX_PAIRS    = 5
-local CHUNK_DELAY  = 0.03
-local PLAYER_RANGE = 60
-
-task.spawn(function()
-    while task.wait(0.03) do
-        if not _G.Level then continue end
-
-        pcall(function()
-            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-
-            if (root.Position - block.Position).Magnitude > SETTLE_RANGE then
-                return
-            end
-
-            local enemies = workspace:FindFirstChild("Enemies")
-            if not enemies then return end
-
-            local children = enemies:GetChildren()
-            if #children == 0 then return end
-
-            local closest, closestDist = nil, 80
-            local fbClosest, fbDist = nil, 80
-            for _, v in ipairs(children) do
-                if not Attack.Alive(v) then continue end
-                if v:FindFirstChild("HumanoidRootPart") and v.Name == "Prisoner" then
-                    local badAcc = v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)")
-                    if badAcc then continue end
-                end
-                if v:FindFirstChild("HumanoidRootPart") then
-                    local dist = (v.HumanoidRootPart.Position - root.Position).Magnitude
-                    if dist < closestDist and not BringStuck[v] then
-                        closestDist = dist
-                        closest = v
-                    end
-                    if dist < fbDist then
-                        fbDist = dist
-                        fbClosest = v
-                    end
-                end
-            end
-            closest = closest or fbClosest
-            if not closest then return end
-
-            local anchorPos = closest.HumanoidRootPart.Position
-
-            local pool = {}
-            for _, v in ipairs(children) do
-                if Attack.Alive(v) and v:FindFirstChild("HumanoidRootPart") then
-                    if v.Name == "Prisoner" and v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)") then
-                        continue
-                    end
-                    local dStack  = (v.HumanoidRootPart.Position - anchorPos).Magnitude
-                    local dPlayer = (v.HumanoidRootPart.Position - root.Position).Magnitude
-                    if dStack <= 100 and dPlayer <= PLAYER_RANGE then
-                        table.insert(pool, { mob = v, dist = dPlayer, hit = HitOrder[v] or 0 })
-                    end
-                end
-            end
-            if #pool == 0 then
-                pool[1] = { mob = closest, dist = closestDist, hit = 0 }
-            end
-
-            table.sort(pool, function(a, b)
-                if a.hit ~= b.hit then return a.hit < b.hit end
-                return a.dist < b.dist
-            end)
-
-            if NO_BRING_MOBS[closest.Name] then
-                pool = { pool[1] }
-            end
-
-            EquipWeapon(_G.SelectWeapon)
-
-            VirtualUser:CaptureController()
-            VirtualUser:Button1Down(Vector2.new(0, 0))
-            task.wait(0.012)
-            VirtualUser:Button1Up(Vector2.new(0, 0))
-
-            local net = replicated:FindFirstChild("Modules") and replicated.Modules:FindFirstChild("Net")
-            if net then
-                local attackRE = net:FindFirstChild("RE/RegisterAttack")
-                local hitRE    = net:FindFirstChild("RE/RegisterHit")
-                if attackRE and hitRE then
-                    local i, pairsSent = 1, 0
-                    while i <= #pool and pairsSent < MAX_PAIRS do
-                        local chunk = {}
-                        for j = i, math.min(i + ATTACK_CHUNK - 1, #pool) do
-                            local m = pool[j].mob
-                            table.insert(chunk, { m, m.HumanoidRootPart })
-                            HitOrder[m] = tick()
-                        end
-                        attackRE:FireServer(0.3)
-                        hitRE:FireServer(chunk[1][2], chunk)
-                        pairsSent += 1
-                        i += ATTACK_CHUNK
-                        if i <= #pool and pairsSent < MAX_PAIRS then
-                            task.wait(CHUNK_DELAY)
-                        end
-                    end
-                end
-            end
-
-            for _, v in ipairs(pool) do
-                local hum = v.mob:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    local hp0 = DamageHP[v.mob]
-                    if hp0 == nil then
-                        DamageHP[v.mob] = hum.Health
-                        DamageHPLast[v.mob] = tick()
-                    elseif math.abs(hum.Health - hp0) > 0.5 then
-                        DamageConfirmed[v.mob] = true
-                        DamageHP[v.mob] = hum.Health
-                        DamageHPLast[v.mob] = tick()
-                    end
-                end
-            end
-        end)
-    end
-end)
-
-task.spawn(function()
-    while task.wait(1) do
-        if not _G.Level then continue end
-        pcall(function()
-            local now = tick()
-
-            for m, blockedUntil in pairs(PhantomBlocked) do
-                if not m.Parent then
-                    PhantomBlocked[m] = nil
-                elseif now >= blockedUntil then
-                    PhantomBlocked[m] = nil
-                    BringStuck[m] = nil
-                    NoBring[m] = nil
-                end
-            end
-
-            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-
-            for m, lastChange in pairs(DamageHPLast) do
-                if not m.Parent or not Attack.Alive(m) then
-                    DamageHPLast[m] = nil
-                    DamageHP[m] = nil
-                else
-                    if NO_BRING_MOBS[m.Name] then continue end
-                    local hrp = m:FindFirstChild("HumanoidRootPart")
-                    local dist = hrp and (hrp.Position - root.Position).Magnitude or 9e9
-                    local beingHit = HitOrder[m] and (now - HitOrder[m]) < 1.5
-                    local confirmed = DamageConfirmed[m] == true
-                    local near = dist <= PLAYER_RANGE
-
-                    if confirmed and beingHit and near
-                        and not PhantomBlocked[m]
-                        and (now - lastChange) >= PHANTOM_TIME then
-                        PhantomRelease(m)
-                    end
-                end
-            end
-        end)
-    end
-end)
-
-local function GetCurrentQuest()
-    local ok, res = pcall(function()
-        local tracked = LocalPlayer.PlayerGui:FindFirstChild("TrackedQuestFrame")
-        if not tracked then return nil end
-        local frame = tracked:FindFirstChild("Frame")
-        if not frame then return nil end
-        local header = frame:FindFirstChild("header")
-        local title = header and header:FindFirstChild("textLabel")
-        local description = frame:FindFirstChild("description")
-        local progress = frame:FindFirstChild("progress")
-        if not title or not title:IsA("TextLabel") then return nil end
-        local name = title.Text
-        if name == "" or name == "---" then return nil end
-        return {
-            Name     = name,
-            Target   = (description and description:IsA("TextLabel")) and description.Text or "",
-            Progress = (progress and progress:IsA("TextLabel")) and progress.Text or "",
-        }
-    end)
-    if ok then return res end
     return nil
 end
 
-local questCache, questCacheT = nil, 0
-
-local function GetCurrentQuestCached()
-    local now = tick()
-    if now - questCacheT > QUEST_CACHE_TTL then
-        questCache = GetCurrentQuest()
-        questCacheT = now
+function core.getFruitEquipped()
+    if character then
+        for _, t in ipairs(character:GetChildren()) do
+            if t:IsA("Tool") and t.ToolTip == "Blox Fruit" then return t end
+        end
     end
-    return questCache
+    if backpack then
+        for _, t in ipairs(backpack:GetChildren()) do
+            if t:IsA("Tool") and t.ToolTip == "Blox Fruit" then return t end
+        end
+    end
+    return core.findOwnedFruitTool(nil)
 end
 
-local function ParseProgress(str)
-    local a, b = (str or ""):match("(%d+)%s*/%s*(%d+)")
-    if a and b then return tonumber(a), tonumber(b) end
-    return nil, nil
+function core.getGunEquipped()
+    if character then
+        for _, t in ipairs(character:GetChildren()) do
+            if t:IsA("Tool") and t.ToolTip == "Gun" then return t end
+        end
+    end
+    if backpack then
+        for _, t in ipairs(backpack:GetChildren()) do
+            if t:IsA("Tool") and t.ToolTip == "Gun" then return t end
+        end
+    end
+    return nil
 end
 
-local function Norm(s)
-    s = (s or ""):lower():gsub("[^%w%s]", " ")
-    return (s:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
+function core.pressSkill(key)
+    if not vim_Service then return end
+    local code = Enum.KeyCode[key]
+    if not code then return end
+    pcall(function()
+        vim_Service:SendKeyEvent(true, code, false, game)
+        task.wait(0.08)
+        vim_Service:SendKeyEvent(false, code, false, game)
+    end)
 end
 
-local function TextHas(text, word)
-    text, word = Norm(text), Norm(word)
-    if text == "" or word == "" then return false end
-    return text:find(word, 1, true) ~= nil
+function core.useFruitSkills(mob)
+    if Config.FarmMethod ~= "Fruit" then return end
+    if tick() < (vars._FruitSkillsReady or 0) then return end
+    local fruit = core.getFruitEquipped()
+    if fruit and fruit.Parent ~= character and humanoid then
+        pcall(function() humanoid:EquipTool(fruit) end)
+        task.wait(0.15)
+    end
+    local root = mob and mob:FindFirstChild("HumanoidRootPart")
+    local cam = workspace.CurrentCamera
+    if cam and root then
+        pcall(function()
+            cam.CFrame = CFrame.lookAt(cam.CFrame.Position, root.Position)
+        end)
+        task.wait(0.04)
+    end
+    local any = false
+    for _, key in ipairs({ "Z", "X", "C", "V", "F" }) do
+        if Config.FruitSkills[key] then
+            any = true
+            if mob and not core.IsAlive(mob) then break end
+            core.pressSkill(key)
+            task.wait(vars.SkillDelay or 0.25)
+        end
+    end
+    if any then vars._FruitSkillsReady = tick() + 0.6 end
 end
 
-local function CleanName(s)
-    s = (s or ""):gsub("%b[]", " "):gsub("%d+", " "):gsub("[^%w%s]", " ")
-    return Norm(s)
+function core.attackMeleeOrSword(mob)
+    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
+    if not mobRootPart then return false end
+    core.equipWeapon(vars.SelectWeapon)
+    core.activateHaki()
+    if virtual_User then
+        pcall(function()
+            virtual_User:CaptureController()
+            virtual_User:Button1Down(Vector2.new(0, 0))
+            task.wait(0.012)
+            virtual_User:Button1Up(Vector2.new(0, 0))
+        end)
+    end
+    pcall(function() attack_RE:FireServer(0.5) end)
+    pcall(function() registerHit_RE:FireServer(mobRootPart, { { mob, mobRootPart } }) end)
+    return true
 end
 
-local function SameMob(enemyName, target)
-    if not enemyName or not target then return false end
-    if enemyName == target then return true end
-    local a, b = CleanName(enemyName), CleanName(target)
-    if a ~= "" and a == b then return true end
-    local sa = Norm(a:gsub("boss", " "))
-    local sb = Norm(b:gsub("boss", " "))
-    return sa ~= "" and sa == sb
+function core.attackGun(mob)
+    local mobRootPart = mob:FindFirstChild("HumanoidRootPart")
+    if not mobRootPart or not vim_Service then return false end
+    local gun = core.getGunEquipped()
+    if not gun then
+        vars.SelectWeapon = core.getBestWeapon("Gun") or vars.SelectWeapon
+        core.equipWeapon(vars.SelectWeapon)
+        gun = core.getGunEquipped()
+    end
+    if gun and humanoid then
+        pcall(function() humanoid:EquipTool(gun) end)
+        task.wait(0.08)
+    end
+    core.activateHaki()
+    local cam = workspace.CurrentCamera
+    if not cam then return false end
+    local screenPos, onScreen = cam:WorldToViewportPoint(mobRootPart.Position)
+    if not onScreen then
+        pcall(function()
+            cam.CFrame = CFrame.lookAt(cam.CFrame.Position, mobRootPart.Position)
+        end)
+        task.wait(0.05)
+        screenPos, onScreen = cam:WorldToViewportPoint(mobRootPart.Position)
+    end
+    if not onScreen then return false end
+    pcall(function()
+        vim_Service:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 0)
+        task.wait(0.05)
+        vim_Service:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 0)
+    end)
+    return true
 end
 
-local function IsValidQuestMob(v, mob)
-    if not SameMob(v.Name, mob) then return false end
-    if v.Name == "Prisoner" and v:FindFirstChild("Accessory (Big_Chain_Around_Neck_Silver)") then
+function core.attackFruit(mob)
+    core.activateHaki()
+    core.useFruitSkills(mob)
+    return true
+end
+
+function core.attack(mob)
+    if not core.IsAlive(mob) or not character then return false end
+    local now = tick()
+    if now - LastFire < vars.FireInterval then return false end
+    LastFire = now
+    local method = Config.FarmMethod or "Melee"
+    if method == "Gun" then
+        return core.attackGun(mob)
+    elseif method == "Fruit" then
+        return core.attackFruit(mob)
+    else
+        return core.attackMeleeOrSword(mob)
+    end
+end
+
+function core.getLevel()
+    if not data_DIR then data_DIR = player:FindFirstChild("Data") end
+    if not data_DIR then return 0 end
+    local lvl = data_DIR:FindFirstChild("Level")
+    return lvl and lvl.Value or 0
+end
+
+function core.getStatValue(statName)
+    if not data_DIR then data_DIR = player:FindFirstChild("Data") end
+    if not data_DIR then return 0 end
+    local v = data_DIR:FindFirstChild(statName)
+    if v and (v:IsA("IntValue") or v:IsA("NumberValue")) then return v.Value end
+    return 0
+end
+
+function core.getPoints()
+    return core.getStatValue("Points")
+end
+
+function core.inLevelRange()
+    local lvl = core.getLevel()
+    if lvl >= (Config.MaxLevel or 2800) then
+        return false
+    end
+    if Config.LevelRange and lvl < (Config.MinLevel or 1) then
         return false
     end
     return true
 end
 
-local function GetPlayerLevel()
-    local ok, lvl = pcall(function()
-        local d = LocalPlayer:FindFirstChild("Data")
-        local v = d and d:FindFirstChild("Level")
-        if v then return v.Value end
-        local ls = LocalPlayer:FindFirstChild("leaderstats")
-        if ls then
-            for _, n in ipairs({ "Level", "level", "Lvl" }) do
-                local v2 = ls:FindFirstChild(n)
-                if v2 then return v2.Value end
-            end
-        end
-        return nil
-    end)
-    if ok then return lvl end
-    return nil
+function core.stopAllMovement()
+    shouldTween = false
+    vars.Tweening = false
+    if activeTween then
+        pcall(function() activeTween:Cancel() end)
+    end
+    activeTween, activeTarget = nil, nil
+    if vars.BodyClip and vars.BodyClip.Parent then
+        pcall(function() vars.BodyClip:Destroy() end)
+        vars.BodyClip = nil
+    end
 end
 
-local QuestModule, GuideModule, CommF
-task.spawn(function()
-    pcall(function() QuestModule = require(replicated:WaitForChild("Quests", 15)) end)
-    pcall(function() GuideModule = require(replicated:WaitForChild("GuideModule", 15)) end)
-    pcall(function() CommF = replicated:WaitForChild("Remotes", 15):WaitForChild("CommF_", 15) end)
-end)
+function core.resumeMovement()
+    shouldTween = true
+end
 
-local blacklist = { "MarineQuest", "BartiloQuest", "CitizenQuest", "Trainees" }
+function core.getQuestTargets(taskTable)
+    local list = {}
+    if type(taskTable) ~= "table" then return list end
+    for mobName, req in pairs(taskTable) do
+        if type(mobName) == "string" then
+            local need = type(req) == "number" and req or (type(req) == "table" and req.Amount) or 1
+            if need > 0 then table.insert(list, { Name = mobName, Need = need }) end
+        end
+    end
+    return list
+end
 
-local AllMobNames = {}
-local ModulePoolLoaded = false
-
-local function RebuildMobPool()
-    if type(QuestModule) == "table" and not ModulePoolLoaded then
-        for _, qData in pairs(QuestModule) do
-            if type(qData) == "table" then
-                for _, d in pairs(qData) do
-                    if type(d) == "table" and type(d.Task) == "table" then
-                        for mob in pairs(d.Task) do
-                            if type(mob) == "string" and mob ~= "" then
-                                AllMobNames[mob] = true
-                            end
+function core.getBestQuest()
+    local currentLevel = core.getLevel()
+    local minL = Config.LevelRange and (Config.MinLevel or 1) or 1
+    local maxL = Config.LevelRange and (Config.MaxLevel or 2800) or 99999
+    local best = nil
+    for quest_Name, quest_Data in next, questsM do
+        if type(quest_Data) == "table" and not quest_blacklist[quest_Name] then
+            for id, entry in next, quest_Data do
+                if type(entry) == "table"
+                    and type(entry.LevelReq) == "number"
+                    and type(entry.Task) == "table"
+                    and currentLevel >= entry.LevelReq
+                    and entry.LevelReq >= minL
+                    and entry.LevelReq <= maxL
+                then
+                    local targets = core.getQuestTargets(entry.Task)
+                    if #targets > 0 then
+                        if not best or entry.LevelReq > best.LevelReq then
+                            best = {
+                                InternalName = quest_Name,
+                                ID = id,
+                                LevelReq = entry.LevelReq,
+                                DisplayName = entry.Name or quest_Name,
+                                Task = entry.Task,
+                                Targets = targets,
+                                PrimaryMob = targets[1].Name,
+                            }
                         end
                     end
                 end
             end
-        end
-        if next(AllMobNames) then ModulePoolLoaded = true end
-    end
-    local enemies = workspace:FindFirstChild("Enemies")
-    if enemies then
-        for _, v in ipairs(enemies:GetChildren()) do
-            if v:IsA("Model") and v.Name ~= "" then
-                AllMobNames[v.Name] = true
-            end
-        end
-    end
-end
-
-task.spawn(function()
-    while task.wait(5) do
-        pcall(RebuildMobPool)
-        pcall(function()
-            for m in pairs(BringFails) do
-                if not m.Parent then CleanupMobTables(m) end
-            end
-            for m in pairs(HitOrder) do
-                if not m.Parent then HitOrder[m] = nil end
-            end
-            for m in pairs(DamageConfirmed) do
-                if typeof(m) == "Instance" and not m.Parent then
-                    DamageConfirmed[m] = nil
-                    DamageHP[m] = nil
-                    DamageHPLast[m] = nil
-                end
-            end
-        end)
-    end
-end)
-
-local function GetBestQuest()
-    local lvl = GetPlayerLevel() or 0
-
-    if lvl >= 700 and World1 then
-        return { Mob = "Galley Captain", NameQuest = "FountainQuest", ID = 2, LevelReq = 700 }
-    end
-    if lvl >= 1500 and World2 then
-        return { Mob = "Water Fighter", NameQuest = "ForgottenQuest", ID = 2, LevelReq = 1450 }
-    end
-
-    if QuestModule and type(QuestModule) == "table" then
-        local best = { LevelReq = -1 }
-        for qName, qData in pairs(QuestModule) do
-            if type(qData) == "table" and not table.find(blacklist, qName) then
-                for id, d in pairs(qData) do
-                    if type(d) == "table" and type(d.LevelReq) == "number" and type(d.Task) == "table" then
-                        for mob, count in pairs(d.Task) do
-                            if type(mob) == "string" and type(count) == "number"
-                                and count > 1 and lvl >= d.LevelReq then
-                                local better = d.LevelReq > best.LevelReq
-                                    or (d.LevelReq == best.LevelReq and tostring(qName) < tostring(best.NameQuest))
-                                if better then
-                                    best = { Mob = mob, NameQuest = qName, ID = id, LevelReq = d.LevelReq, Count = count }
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        if best.Mob then return best end
-    end
-
-    local best
-    for _, q in ipairs(QUEST_GIVERS) do
-        if lvl >= (q.Level or 0) and (not best or (q.Level or 0) > (best.Level or 0)) then
-            best = q
         end
     end
     return best
 end
 
-local function InUnderwater()
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    return root ~= nil and root.Position.X > UW_X
+function core.getQuestProgress()
+    local q = ActiveQuest or (guideM.Data and guideM.Data.QuestData)
+    if not q or type(q) ~= "table" or type(q.Info) ~= "table" then return nil end
+    local taskT = q.Info.Task or {}
+    local prog = q.Progress or {}
+    local targets = {}
+    local done, total = 0, 0
+    for mobName, req in pairs(taskT) do
+        if type(mobName) == "string" then
+            local need = type(req) == "number" and req or (type(req) == "table" and req.Amount) or 1
+            local cur = prog[mobName]
+            local have = 0
+            if cur == true then have = need
+            elseif type(cur) == "number" then have = math.clamp(cur, 0, need) end
+            done += have
+            total += need
+            table.insert(targets, { Name = mobName, Have = have, Need = need, Done = have >= need })
+        end
+    end
+    return {
+        InternalName = q.InternalQuestName,
+        DisplayName = q.Info.Name or q.InternalQuestName,
+        Task = taskT,
+        Progress = prog,
+        Targets = targets,
+        PrimaryMob = targets[1] and targets[1].Name,
+        Current = done,
+        Max = total,
+        Finished = total > 0 and done >= total,
+        Raw = q,
+    }
 end
 
-local function IsDeepFishmanQuest(best)
-    if not World1 or not best then return false end
-    if best.NameQuest == "FishmanQuest" then return true end
-    return TextHas(best.Mob or "", "Fishman")
+function core.startBestQuest()
+    local best = core.getBestQuest()
+    if not best then return nil end
+    pcall(function()
+        xuynia_RF:InvokeServer("StartQuest", best.InternalName, best.ID)
+    end)
+    return best
 end
 
-local function ReqEnter(vec)
-    if CommF then
-        pcall(function() CommF:InvokeServer("requestEntrance", vec) end)
+function core.getClosestMob(name)
+    local enemies = workspace:FindFirstChild("Enemies")
+    if not enemies or not humanoidRootPart then return nil end
+    local best, bestD = nil, math.huge
+    for _, v in ipairs(enemies:GetChildren()) do
+        if v:IsA("Model") and core.IsAlive(v) then
+            if not name or v.Name == name then
+                local hrp = v:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local d = (hrp.Position - humanoidRootPart.Position).Magnitude
+                    if d < bestD then bestD, best = d, v end
+                end
+            end
+        end
+    end
+    return best
+end
+
+function core.getMobSpawnCFrame(mobName)
+    if type(mobName) ~= "string" or mobName == "" then return nil end
+    local short = string.gsub(mobName, "%s*%[Lv%.?%s*%d+%]$", "")
+    local world = workspace:FindFirstChild("_WorldOrigin")
+    local spawns = world and world:FindFirstChild("EnemySpawns")
+    if spawns then
+        local best
+        for _, sp in ipairs(spawns:GetChildren()) do
+            local n = sp.Name
+            if n == mobName or n == short or string.find(n, short, 1, true) then
+                if sp:IsA("BasePart") then
+                    return sp.CFrame
+                elseif sp:IsA("Model") then
+                    local p = sp.PrimaryPart or sp:FindFirstChildWhichIsA("BasePart")
+                    if p then return p.CFrame end
+                elseif typeof(sp.CFrame) == "CFrame" then
+                    return sp.CFrame
+                elseif typeof(sp.Position) == "Vector3" then
+                    return CFrame.new(sp.Position)
+                end
+            end
+        end
+    end
+    if world then
+        for _, sp in ipairs(world:GetDescendants()) do
+            if sp:IsA("BasePart") then
+                local n = sp.Name
+                if n == short or n == mobName or string.find(n, short, 1, true) then
+                    return sp.CFrame
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function core.SpawnTweenPart()
+    if not character or not humanoidRootPart then return false end
+    if not idk or not idk.Parent then
+        local part = Instance.new("Part")
+        part.Name = "RH_FarmBlock"
+        part.Size = Vector3.new(2, 1, 2)
+        part.Transparency = 1
+        part.Anchored = true
+        part.CanCollide = false
+        part.Parent = workspace
+        idk = part
+    end
+    if not vars.BodyClip or not vars.BodyClip.Parent then
+        local bv = Instance.new("BodyVelocity")
+        bv.Name = "RH_BodyClip"
+        bv.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+        bv.Velocity = Vector3.zero
+        bv.Parent = humanoidRootPart
+        vars.BodyClip = bv
+    elseif vars.BodyClip.Parent ~= humanoidRootPart then
+        vars.BodyClip.Parent = humanoidRootPart
+    end
+    return true
+end
+
+function core.gotoQuest(pos, force)
+    if not character or not humanoidRootPart then
+        core.log("gotoQuest error, no char/hrp", true)
+        return
+    end
+    core.SpawnTweenPart()
+    local goal
+    if typeof(pos) == "Vector3" then
+        goal = CFrame.new(pos)
+    elseif typeof(pos) == "CFrame" then
+        goal = pos
+    else
+        return
+    end
+    if not force and activeTween
+        and activeTween.PlaybackState == Enum.PlaybackState.Playing
+        and activeTarget and (activeTarget.Position - goal.Position).Magnitude < 2 then
+        return
+    end
+    if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+        pcall(function() activeTween:Cancel() end)
+    end
+    if idk then
+        idk.CFrame = humanoidRootPart.CFrame
+    end
+    local dist = (goal.Position - (idk and idk.Position or humanoidRootPart.Position)).Magnitude
+    local time = math.max(dist / (vars.QuestMoveSpeed or QUEST_MOVE_SPEED), 0.05)
+    activeTarget = goal
+    local tw = tween_Service:Create(idk, TweenInfo.new(time, Enum.EasingStyle.Linear), { CFrame = goal })
+    activeTween = tw
+    vars.Tweening = true
+    tw:Play()
+    task.spawn(function()
+        while tw and tw.PlaybackState == Enum.PlaybackState.Playing do
+            if not shouldTween or not vars.FarmEnabled then
+                pcall(function() tw:Cancel() end)
+                break
+            end
+            if humanoidRootPart and idk then
+                local d = (humanoidRootPart.Position - idk.Position).Magnitude
+                if d <= 25 then
+                    humanoidRootPart.CFrame = idk.CFrame
+                end
+            end
+            task.wait()
+        end
+        vars.Tweening = false
+        if humanoidRootPart and idk then
+            humanoidRootPart.CFrame = idk.CFrame
+        end
+    end)
+end
+
+function core.gotoFruit(pos)
+    if vars.Tweening then return end
+    if not character or not humanoidRootPart then return end
+    core.SpawnTweenPart()
+    local goal
+    if typeof(pos) == "Vector3" then
+        goal = CFrame.new(pos)
+    elseif typeof(pos) == "CFrame" then
+        goal = pos
+    else
+        return
+    end
+    local start = humanoidRootPart.Position
+    local target = goal.Position
+    local dist = (target - start).Magnitude
+    if dist < 1 then
+        humanoidRootPart.CFrame = goal
+        if idk then idk.CFrame = goal end
+        return
+    end
+    local duration = math.clamp(dist / vars.TweenSpeed, 0.05, 12)
+    vars.Tweening = true
+    local t0 = tick()
+    while tick() - t0 < duration do
+        if not character or not humanoidRootPart then break end
+        local alpha = math.clamp((tick() - t0) / duration, 0, 1)
+        local p = start:Lerp(target, alpha)
+        local cf = CFrame.new(p)
+        humanoidRootPart.CFrame = cf
+        if idk then idk.CFrame = cf end
+        if vars.BodyClip then vars.BodyClip.Velocity = Vector3.zero end
+        run_Service.Heartbeat:Wait()
+    end
+    if character and humanoidRootPart then
+        humanoidRootPart.CFrame = goal
+        if idk then idk.CFrame = goal end
+    end
+    vars.Tweening = false
+end
+
+function core.goto(pos)
+    core.gotoQuest(pos)
+end
+
+function core.AnchorAboveMob(mob)
+    if typeof(mob) ~= "Instance" or not mob:IsA("Model") then return false end
+    if not core.IsAlive(mob) then return false end
+    local hrp = mob:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local ay = (Config.FarmMethod == "Fruit") and (vars.FruitAttackY or 10) or (vars.AttackY or 12)
+    if Config.FarmMethod == "Gun" then ay = 8 end
+    local targetCF = hrp.CFrame * CFrame.new(0, ay, 0)
+    if not core.SpawnTweenPart() then return false end
+    local d = (humanoidRootPart.Position - targetCF.Position).Magnitude
+    if d > (vars.SettleRange or 15) then
+        core.gotoQuest(targetCF)
+    else
+        humanoidRootPart.CFrame = targetCF
+        if idk then idk.CFrame = targetCF end
+        if vars.BodyClip then vars.BodyClip.Velocity = Vector3.zero end
+    end
+    return true
+end
+
+function core.InUnderwater()
+    return humanoidRootPart ~= nil and humanoidRootPart.Position.X > UW_X
+end
+
+function core.IsDeepFishmanMob(name)
+    if type(name) ~= "string" then return false end
+    return string.find(string.lower(name), "fishman", 1, true) ~= nil
+end
+
+function core.ReqEnter(vec)
+    if xuynia_RF then
+        pcall(function() xuynia_RF:InvokeServer("requestEntrance", vec) end)
     end
 end
 
-local function AtEntrance()
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-    if InUnderwater() then return true end
-    return (root.Position - UW_ENTER).Magnitude <= UW_ARRIVE_RADIUS
-end
-
-local function EnterUnderwaterCity()
-    if InUnderwater() then return true end
-    if not _G.Level then return false end
+function core.EnterUnderwaterCity()
+    if core.InUnderwater() then return true end
     if UWRouteBusy then return false end
-
     UWRouteBusy = true
     local ok = false
-
     local targetCF = CFrame.new(UW_ENTER + Vector3.new(0, 4, 0))
-    UpdateStatus("Fishman: flying to cavern entrance")
-    _tp(targetCF)
-
+    core.log("Fishman: flying to cavern entrance")
+    core.gotoQuest(targetCF, true)
     local lastFire = 0
     local deadline = tick() + UW_MAX_TIME
     while tick() < deadline do
-        if not _G.Level then break end
-
-        if InUnderwater() then
+        if not vars.FarmEnabled then break end
+        if core.InUnderwater() then
             ok = true
-            UpdateStatus("Fishman: inside underwater city")
+            core.log("Fishman: inside underwater city")
             break
         end
-
-        if AtEntrance() and tick() - lastFire >= UW_REMOTE_EVERY then
-            lastFire = tick()
-            ReqEnter(UW_ENTER)
+        if humanoidRootPart and (humanoidRootPart.Position - UW_ENTER).Magnitude <= UW_ARRIVE_RADIUS then
+            if tick() - lastFire >= UW_REMOTE_EVERY then
+                lastFire = tick()
+                core.ReqEnter(UW_ENTER)
+            end
         end
-
-        if activeTarget and (activeTarget.Position - targetCF.Position).Magnitude > 30 then
-            _tp(targetCF, true)
-        end
-
         task.wait(0.2)
     end
-
     if not ok then
-        UpdateStatus("Fishman: last resort TP into city")
-        notween(CFrame.new(UW_QUESTSPOT))
+        core.log("Fishman: last resort TP into city")
+        if humanoidRootPart then
+            humanoidRootPart.CFrame = CFrame.new(UW_QUESTSPOT)
+        end
         task.wait(0.4)
-        ok = InUnderwater()
+        ok = core.InUnderwater()
     end
-
     UWRouteBusy = false
     return ok
 end
 
-local function ExitUnderwaterCity()
-    if not InUnderwater() then return true end
-    if not _G.Level then return false end
+function core.ExitUnderwaterCity()
+    if not core.InUnderwater() then return true end
     if UWRouteBusy then return false end
-
     UWRouteBusy = true
     local ok = false
-
     local exitPos = UW_CITY_EXIT
-    pcall(function()
-        local ex = workspace:FindFirstChild("TeleportSpawn", true)
-            or (workspace.Map and workspace.Map:FindFirstChild("Exit", true))
-        if ex and ex:IsA("BasePart") then
-            exitPos = ex.Position
-        end
-    end)
-
     local targetCF = CFrame.new(exitPos + Vector3.new(0, 4, 0))
-    UpdateStatus("Fishman: exiting city")
-    _tp(targetCF)
-
+    core.log("Fishman: exiting city")
+    core.gotoQuest(targetCF, true)
     local lastFire = 0
     local deadline = tick() + UW_MAX_TIME
     while tick() < deadline do
-        if not _G.Level then break end
-
-        if not InUnderwater() then
+        if not vars.FarmEnabled then break end
+        if not core.InUnderwater() then
             ok = true
-            UpdateStatus("Fishman: exited, normal route")
+            core.log("Fishman: exited")
             break
         end
-
         if tick() - lastFire >= UW_REMOTE_EVERY then
             lastFire = tick()
-            ReqEnter(exitPos)
+            core.ReqEnter(exitPos)
         end
-
-        if activeTarget and (activeTarget.Position - targetCF.Position).Magnitude > 30 then
-            _tp(targetCF, true)
-        end
-
         task.wait(0.2)
     end
-
     if not ok then
-        UpdateStatus("Fishman: last resort TP outside")
-        notween(CFrame.new(UW_OUT))
+        if humanoidRootPart then
+            humanoidRootPart.CFrame = CFrame.new(UW_OUT)
+        end
         task.wait(0.4)
-        ok = not InUnderwater()
+        ok = not core.InUnderwater()
     end
-
     UWRouteBusy = false
     return ok
 end
 
-local function FindNPCModel(name)
-    if not name or name == "" then return nil, nil end
-    local npc = workspace:FindFirstChild(name, true)
-    if not npc then return nil, nil end
-    if npc:IsA("Model") then
-        return npc, npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart")
-    elseif npc:IsA("BasePart") then
-        return nil, npc
-    end
-    return nil, nil
+function core.UpgradeStat(stat, points)
+    if not xuynia_RF then return end
+    if core.getPoints() <= 0 then return end
+    if core.getStatValue(stat) >= STAT_MAX then return end
+    pcall(function() xuynia_RF:InvokeServer("AddPoint", stat, points or 1) end)
 end
 
-local function FireNPC(npcModel)
-    if not npcModel then return false end
-    local prompt = npcModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt then
-        local ok = pcall(function() fireproximityprompt(prompt) end)
-        if not ok then
-            pcall(function()
-                prompt:InputHoldBegin()
-                task.wait(0.15)
-                prompt:InputHoldEnd()
-            end)
-        end
-        return true
-    end
-    local click = npcModel:FindFirstChildWhichIsA("ClickDetector", true)
-    if click then
-        pcall(function() fireclickdetector(click) end)
-        return true
-    end
-    return false
+function core.isSea3()
+    local pid = game.PlaceId
+    if pid == SEA3_PLACE then return true end
+    return core.getLevel() >= 1500 and pid ~= SEA1_PLACE and pid ~= SEA2_PLACE
 end
 
-local function ApproachNPC(npcRoot, timeout)
-    _tp(npcRoot.CFrame * CFrame.new(0, 0, -3.5))
-
-    local deadline = tick() + (timeout or 8)
-    while tick() < deadline do
-        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if not root or not _G.Level then return false end
-        if (root.Position - npcRoot.Position).Magnitude <= 8 then
-            return true
-        end
-        task.wait(0.1)
-    end
-    return false
+function core.isSea2()
+    return game.PlaceId == SEA2_PLACE
 end
 
-local function TeleportToQuestNPC(best, timeout)
-    timeout = timeout or 8
-
-    if IsDeepFishmanQuest(best) then
-        if not EnterUnderwaterCity() then
-            return false, "no_entry"
-        end
-    elseif InUnderwater() then
-        ExitUnderwaterCity()
-    end
-
-    local npcModel, npcRoot
-    if GuideModule and GuideModule.Data and GuideModule.Data.LastClosestNPC then
-        npcModel, npcRoot = FindNPCModel(GuideModule.Data.LastClosestNPC)
-    end
-    if not npcRoot and best and best.NPC then
-        npcModel, npcRoot = FindNPCModel(best.NPC)
-    end
-
-    if not npcRoot then
-        return true
-    end
-
-    return ApproachNPC(npcRoot, timeout)
+function core.isWorld1()
+    local pid = game.PlaceId
+    return pid == SEA1_PLACE or pid == 85211729168715
 end
 
-local function TryStartQuest(best)
-    if CommF and best.NameQuest then
-        pcall(function() CommF:InvokeServer("StartQuest", best.NameQuest, best.ID) end)
-    else
-        local npcModel, npcRoot
-        if best and best.NPC then
-            npcModel, npcRoot = FindNPCModel(best.NPC)
-        end
-        if npcRoot then
-            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if root and (root.Position - npcRoot.Position).Magnitude > 8 then
-                ApproachNPC(npcRoot, 4)
-            end
-            FireNPC(npcModel)
-            task.wait(0.4)
-            FireNPC(npcModel)
-        end
-    end
-
-    local deadline = tick() + QUEST_CONFIRM_WAIT
-    while tick() < deadline do
-        local q = GetCurrentQuest()
-        if q then return q end
-        if not _G.Level then return nil end
-        task.wait(0.15)
-    end
-    return nil
+function core.isWorld2()
+    local pid = game.PlaceId
+    return pid == SEA2_PLACE or pid == 79091703265657
 end
 
-local QuestMobCache = {}
-
-local function GetQuestMob(quest)
-    local text = Norm((quest.Name or "") .. " " .. (quest.Target or ""))
-    if text == "" then return nil end
-
-    local c = QuestMobCache[text]
-    if c then
-        if c.mob and (ModulePoolLoaded or tick() - c.t < 6) then
-            return c.mob
-        end
-        if not c.mob and tick() - c.t < 1.5 then
-            return nil
-        end
-    end
-
-    local best, bestLen = nil, 0
-    for name in pairs(AllMobNames) do
-        if TextHas(text, name) and #name > bestLen then
-            best, bestLen = name, #name
-        end
-    end
-    QuestMobCache[text] = { mob = best, t = tick() }
-    return best
+function core.isWorld3()
+    local pid = game.PlaceId
+    return pid == SEA3_PLACE or pid == 100117331123089
 end
 
-local SpawnFolder
-pcall(function()
-    local wo = workspace:FindFirstChild("_WorldOrigin")
-    SpawnFolder = wo and wo:FindFirstChild("EnemySpawns")
-end)
-
-local function FindSpawnFor(mob)
-    if not SpawnFolder then return nil end
-    for _, sp in ipairs(SpawnFolder:GetChildren()) do
-        if sp:IsA("BasePart") and SameMob(sp.Name, mob) then
-            return sp
-        end
-    end
-    return nil
-end
-
-local function FindMob(mob)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return nil end
-    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local best, bd
-    for _, v in ipairs(enemies:GetChildren()) do
-        local hum, hrp = v:FindFirstChildOfClass("Humanoid"), v:FindFirstChild("HumanoidRootPart")
-        if hum and hrp and hum.Health > 0 and IsValidQuestMob(v, mob) then
-            local d = myRoot and (hrp.Position - myRoot.Position).Magnitude or math.huge
-            if not bd or d < bd then best, bd = v, d end
-        end
-    end
-    return best
-end
-
-local function FindUnconfirmedMob(mob)
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return nil end
-    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local best, bd
-    for _, v in ipairs(enemies:GetChildren()) do
-        local hum, hrp = v:FindFirstChildOfClass("Humanoid"), v:FindFirstChild("HumanoidRootPart")
-        if hum and hrp and hum.Health > 0 and IsValidQuestMob(v, mob) and not DamageConfirmed[v] then
-            local d = myRoot and (hrp.Position - myRoot.Position).Magnitude or math.huge
-            if not bd or d < bd then best, bd = v, d end
-        end
-    end
-    return best
-end
-
-local function FarmQuestMob(mob)
-    if UWRouteBusy then return end
-
-    local deep = (QuestState.DeepFish == true)
-        or (World1 and TextHas(mob or "", "Fishman") or false)
-
-    if deep and not InUnderwater() then
-        if not EnterUnderwaterCity() then return end
-    elseif not deep and InUnderwater() then
-        if not ExitUnderwaterCity() then return end
-    end
-
-    local noBring = NO_BRING_MOBS[mob or ""]
-
-    if not noBring then
-        local unconf = FindUnconfirmedMob(mob)
-        if unconf then
-            Attack.Kill(unconf, true)
-            return
-        end
-    end
-
-    local target = FindMob(mob)
-    if target then
-        Attack.Kill(target, true)
-    else
-        local sp = FindSpawnFor(mob)
-        if sp then
-            _tp(sp.CFrame * CFrame.new(0, 25, 0))
-        end
-    end
-end
-
-local function GetConnectionEnemies(name)
+function core.getConnectionEnemy(name)
     local en = workspace:FindFirstChild("Enemies")
     if en then
         for _, v in pairs(en:GetChildren()) do
-            if v.Name == name and Attack.Alive(v) then
+            if v.Name == name and core.IsAlive(v) then
                 return v
             end
         end
     end
-    local rs = replicated:FindFirstChild("Enemies")
+    local rs = replicatedstorage_Service:FindFirstChild("Enemies")
     if rs then
         for _, v in pairs(rs:GetChildren()) do
             if v.Name == name then
@@ -1265,564 +989,482 @@ local function GetConnectionEnemies(name)
     return nil
 end
 
-local function HookMobs(mob)
-    if not mob then return end
-    local enemies = workspace:FindFirstChild("Enemies")
-    if not enemies then return end
-    for _, v in ipairs(enemies:GetChildren()) do
-        if SameMob(v.Name, mob) and not hooked[v] then
-            hooked[v] = true
-            local h = v:FindFirstChildOfClass("Humanoid")
-            if h then
-                local conn
-                conn = h.Died:Connect(function()
-                    conn:Disconnect()
-                    if QuestState.Mob and SameMob(mob, QuestState.Mob) then
-                        QuestKillCount += 1
-                    end
-                end)
-            end
-            v.Destroying:Connect(function()
-                hooked[v] = nil
-                CleanupMobTables(v)
-            end)
-        end
-    end
+local Sea2Mode = false
+local TravelActive = false
+local ZouActive = false
+local Sea2Announced = false
+local sea2Stage = 0
+local Sea2StuckCount = 0
+local SEA2_MIN_LEVEL = 700
+local SEA2_DOOR_CF = CFrame.new(1288.73328, 35.8959961, -1361.06274, -0.70963943, 0, -0.704565167, 0, 1, 0, 0.704565167, 0, -0.70963943)
+local SEA2_STUCK_LIMIT = 20
+local SEA3_MIN_LEVEL = 1500
+local Sea3FruitHop = false
+local plateIndex = 1
+local PLATES = {
+    CFrame.new(-1850.49329, 13.1789551, 1750.89685),
+    CFrame.new(-1858.87305, 19.3777466, 1712.01807),
+    CFrame.new(-1803.94324, 16.5789185, 1750.89685),
+    CFrame.new(-1858.55835, 16.8604317, 1724.79541),
+    CFrame.new(-1869.54224, 15.987854, 1681.00659),
+    CFrame.new(-1800.0979, 16.4978027, 1684.52368),
+    CFrame.new(-1819.26343, 14.795166, 1717.90625),
+    CFrame.new(-1813.51843, 14.8604736, 1724.79541),
+}
+local ALLOWED_SEA3_FRUITS = {
+    "Quake-Quake", "Love-Love", "Creation-Creation", "Spider-Spider",
+    "Light-Light", "Sound-Sound", "Phoenix-Phoenix", "Pain-Pain",
+    "Blizzard-Blizzard", "Gravity-Gravity", "Mammoth-Mammoth",
+}
+local zouCache = { progress = -1, t = 0, stored = {}, openable = {}, unlockables = nil, u_t = 0 }
+local ZOU_CACHE_TTL = 3
+
+function core.getFruitId(tool)
+    if not tool then return nil end
+    local id = tool:GetAttribute("OriginalName")
+    if type(id) == "string" and id ~= "" then return id end
+    if fruit_price_data[tool.Name] then return tool.Name end
+    return nil
 end
 
-local function ResetQuestState()
-    QuestState.Confirmed = false
-    QuestState.Mob, QuestState.Need = nil, nil
-    QuestState.DeepFish = nil
-    QuestState.TakenAt = 0
-    QuestKillCount = 0
-    CompleteStallSince = nil
-end
-
-local function QuestFarmStep()
-    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return end
-
-    if Sea2Mode or TravelActive or ZouActive then return end
-
-    local now = tick()
-    local quest = GetCurrentQuestCached()
-
-    if quest then
-        QuestState.LastSeen = now
-        QuestState.Confirmed = true
-
-        local a, b = ParseProgress(quest.Progress)
-        if a and b and b > 0 and a >= b then
-            CompleteStallSince = CompleteStallSince or now
-            if now - CompleteStallSince >= COMPLETE_STALL then
-                UpdateStatus("Quest done, tracker not cleared, taking next")
-                pcall(function() CommF:InvokeServer("AbandonQuest") end)
-                ResetQuestState()
-                QuestState.LastTry = 0
-            end
-            return
-        end
-        CompleteStallSince = nil
-
-        local parsed = GetQuestMob(quest)
-
-        if not QuestState.Mob and parsed then
-            QuestState.Mob = parsed
-            if QuestState.DeepFish == nil and parsed then
-                QuestState.DeepFish = World1 and TextHas(parsed, "Fishman") or false
-            end
-        end
-
-        if ModulePoolLoaded and QuestState.Mob and parsed and not SameMob(parsed, QuestState.Mob) then
-            UpdateStatus("Wrong quest (" .. parsed .. " != " .. QuestState.Mob .. "), abandoning")
-            pcall(function() CommF:InvokeServer("AbandonQuest") end)
-            ResetQuestState()
-            QuestState.LastTry = 0
-            return
-        end
-
-        local mob = QuestState.Mob or parsed
-        if mob then
-            QuestState.Mob = mob
-            HookMobs(mob)
-            UpdateStatus(("Farm %s | mob: %s | %s"):format(quest.Name, mob, quest.Progress ~= "" and quest.Progress or "..."))
-            FarmQuestMob(mob)
-        else
-            UpdateStatus("Detecting quest mob: " .. quest.Name)
-            RebuildMobPool()
-        end
-        return
-    end
-
-    local sinceSeen = now - QuestState.LastSeen
-
-    if QuestState.Confirmed then
-        if sinceSeen < GUI_LAG then
-            if QuestState.Mob and not UWRouteBusy then FarmQuestMob(QuestState.Mob) end
-            return
-        end
-        ResetQuestState()
-        UpdateStatus("Quest done, looking for next")
-        return
-    end
-
-    if QuestState.Need and QuestKillCount >= QuestState.Need then
-        ResetQuestState()
-        UpdateStatus("Quest done by kill counter")
-        return
-    end
-
-    if now - QuestState.TakenAt < QUEST_GRACE then
-        if QuestState.Mob and not UWRouteBusy then FarmQuestMob(QuestState.Mob) end
-        return
-    end
-
-    if now - QuestState.LastTry < 2 then return end
-    QuestState.LastTry = now
-
-    local best = GetBestQuest()
-    if not best then
-        UpdateStatus("No suitable quest for level " .. tostring(GetPlayerLevel() or "?"))
-        return
-    end
-
-    UpdateStatus("Going for quest: " .. tostring(best.NameQuest or best.NPC) .. " | mob: " .. tostring(best.Mob or "?"))
-
-    local arrived, routeErr = TeleportToQuestNPC(best, 8)
-    if not _G.Level then return end
-
-    if routeErr == "no_entry" then
-        UpdateStatus("Cavern entry failed, retry in 2s")
-        return
-    end
-
-    QuestState.TakenAt = tick()
-    local taken = TryStartQuest(best)
-
-    if taken then
-        local parsed = GetQuestMob(taken)
-        if best.Mob and parsed and not SameMob(parsed, best.Mob) then
-            UpdateStatus("Wrong quest taken (" .. parsed .. " instead of " .. best.Mob .. "), abandoning")
-            pcall(function() CommF:InvokeServer("AbandonQuest") end)
-            ResetQuestState()
-            QuestState.LastTry = 0
-            return
-        end
-
-        QuestState.Confirmed = true
-        QuestState.LastSeen  = tick()
-        QuestKillCount = 0
-        CompleteStallSince = nil
-        QuestState.Mob = best.Mob or parsed
-        QuestState.DeepFish = IsDeepFishmanQuest(best)
-        UpdateStatus("Quest taken: " .. taken.Name
-            .. " | mob: " .. tostring(QuestState.Mob)
-            .. (QuestState.DeepFish and " [underwater]" or ""))
-    else
-        if arrived then
-            UpdateStatus("Tracker did not show quest, farming " .. tostring(best.Mob or "?") .. " (retry in " .. QUEST_GRACE .. "s)")
-        else
-            UpdateStatus("Did not reach NPC, retry in " .. QUEST_GRACE .. "s")
-        end
-    end
-end
-
-task.spawn(function()
-    while true do
-        task.wait(Sec)
-        if not _G.Level then continue end
-        pcall(QuestFarmStep)
-    end
-end)
-
-local GachaRF
-task.spawn(function()
+function core.refreshFruitPriceCache()
+    if vars._FruitPriceCache then return end
+    vars._FruitPriceCache = {}
     pcall(function()
-        GachaRF = replicated:WaitForChild("Modules", 15):WaitForChild("Net", 15):WaitForChild("RF/GachaNetworkRF", 15)
+        local list = xuynia_RF:InvokeServer("GetFruits")
+        if type(list) == "table" then
+            for _, f in ipairs(list) do
+                if type(f) == "table" and f.Name and type(f.Price) == "number" then
+                    vars._FruitPriceCache[f.Name] = f.Price
+                end
+            end
+        end
     end)
-end)
+end
 
-local GACHA_INTERVAL = 30
-task.spawn(function()
-    while true do
-        if CONFIG.AutoBuyRandomFruit and GachaRF then
-            pcall(function()
-                GachaRF:InvokeServer({
-                    Context = "Purchase",
-                    BoxName = "ZiolesGacha"
+function core.getFruitPrice(idOrTool)
+    local id = typeof(idOrTool) == "Instance" and core.getFruitId(idOrTool) or idOrTool
+    if not id then return 0 end
+    if fruit_price_data[id] then return fruit_price_data[id] end
+    core.refreshFruitPriceCache()
+    if vars._FruitPriceCache and vars._FruitPriceCache[id] then return vars._FruitPriceCache[id] end
+    return 0
+end
+
+function core.fruitMatchesSelection(id)
+    if not id then return false end
+    for name, enabled in pairs(Config.TweenFruit) do
+        if enabled and type(name) == "string" and #name > 0 then
+            if string.sub(string.lower(id), 1, #name + 1) == string.lower(name) .. "-" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function core.isWorldFruit(obj)
+    if typeof(obj) ~= "Instance" or not obj:IsA("Tool") then return false end
+    if obj.Parent ~= workspace then return false end
+    if obj:GetAttribute("OriginalName") then return true end
+    if obj:FindFirstChild("EatRemote", true) then return true end
+    if obj.Name == "Fruit " or (string.find(obj.Name, "Fruit") and obj:FindFirstChild("Handle")) then return true end
+    return false
+end
+
+function core.findWorldFruits(minPrice)
+    local list = {}
+    for _, v in ipairs(workspace:GetChildren()) do
+        if core.isWorldFruit(v) then
+            local fid = core.getFruitId(v)
+            local price = core.getFruitPrice(fid or v)
+            if not minPrice or price >= minPrice then
+                table.insert(list, {
+                    Tool = v,
+                    Handle = v:FindFirstChild("Handle"),
+                    Id = fid,
+                    Price = price,
+                    Matched = Config.TweenServerFruit and core.fruitMatchesSelection(fid) or false,
                 })
-            end)
-        end
-        task.wait(GACHA_INTERVAL)
-    end
-end)
-
-local FRUIT_ORIGINAL = {
-    ["Rocket Fruit"]     = "Rocket-Rocket",
-    ["Spin Fruit"]       = "Spin-Spin",
-    ["Blade Fruit"]      = "Blade-Blade",
-    ["Spring Fruit"]     = "Spring-Spring",
-    ["Bomb Fruit"]       = "Bomb-Bomb",
-    ["Smoke Fruit"]      = "Smoke-Smoke",
-    ["Spike Fruit"]      = "Spike-Spike",
-    ["Flame Fruit"]      = "Flame-Flame",
-    ["Ice Fruit"]        = "Ice-Ice",
-    ["Sand Fruit"]       = "Sand-Sand",
-    ["Dark Fruit"]       = "Dark-Dark",
-    ["Eagle Fruit"]      = "Eagle-Eagle",
-    ["Diamond Fruit"]    = "Diamond-Diamond",
-    ["Light Fruit"]      = "Light-Light",
-    ["Rubber Fruit"]     = "Rubber-Rubber",
-    ["Ghost Fruit"]      = "Ghost-Ghost",
-    ["Magma Fruit"]      = "Magma-Magma",
-    ["Quake Fruit"]      = "Quake-Quake",
-    ["Buddha Fruit"]     = "Buddha-Buddha",
-    ["Love Fruit"]       = "Love-Love",
-    ["Creation Fruit"]   = "Creation-Creation",
-    ["Spider Fruit"]     = "Spider-Spider",
-    ["Sound Fruit"]      = "Sound-Sound",
-    ["Phoenix Fruit"]    = "Phoenix-Phoenix",
-    ["Portal Fruit"]     = "Portal-Portal",
-    ["Lightning Fruit"]  = "Lightning-Lightning",
-    ["Pain Fruit"]       = "Pain-Pain",
-    ["Blizzard Fruit"]   = "Blizzard-Blizzard",
-    ["Gravity Fruit"]    = "Gravity-Gravity",
-    ["Mammoth Fruit"]    = "Mammoth-Mammoth",
-    ["T-Rex Fruit"]      = "T-Rex-T-Rex",
-    ["Dough Fruit"]      = "Dough-Dough",
-    ["Shadow Fruit"]     = "Shadow-Shadow",
-    ["Venom Fruit"]      = "Venom-Venom",
-    ["Gas Fruit"]        = "Gas-Gas",
-    ["Spirit Fruit"]     = "Spirit-Spirit",
-    ["Tiger Fruit"]      = "Tiger-Tiger",
-    ["Yeti Fruit"]       = "Yeti-Yeti",
-    ["Magnet Fruit"]     = "Magnet-Magnet",
-    ["Kitsune Fruit"]    = "Kitsune-Kitsune",
-    ["Control Fruit"]    = "Control-Control",
-    ["Dragon Fruit"]     = "Dragon-Dragon",
-}
-
-local function GetOriginalFruitName(toolName)
-    local orig = FRUIT_ORIGINAL[toolName]
-    if orig then return orig end
-    local base = toolName:gsub(" Fruit$", "")
-    return base .. "-" .. base
-end
-
-local function UpdStFruit()
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not backpack then return end
-    for _, x in next, backpack:GetChildren() do
-        if x:IsA("Tool") and x:FindFirstChild("EatRemote", true) then
-            local origName = x:GetAttribute("OriginalName") or GetOriginalFruitName(x.Name)
-            local tool = backpack:FindFirstChild(x.Name)
-            if tool then
-                pcall(function()
-                    CommF:InvokeServer("StoreFruit", origName, tool)
-                end)
             end
         end
     end
+    table.sort(list, function(a, b)
+        if a.Matched ~= b.Matched then return a.Matched end
+        return a.Price > b.Price
+    end)
+    return list
 end
 
-local STORE_INTERVAL = 5
-task.spawn(function()
-    while true do
-        if CONFIG.AutoStoreFruit then
-            pcall(UpdStFruit)
-        end
-        task.wait(STORE_INTERVAL)
+function core.findSelectedFruitEntry()
+    for _, entry in ipairs(core.findWorldFruits()) do
+        if core.fruitMatchesSelection(entry.Id) then return entry end
     end
-end)
+    return nil
+end
 
-local function GetMoney()
-    local v = nil
-    pcall(function()
-        local ls = LocalPlayer:FindFirstChild("leaderstats")
-        if ls then
-            for _, n in ipairs({ "Beli", "Money", "Cash" }) do
-                local m = ls:FindFirstChild(n)
-                if m then v = m.Value break end
+function core.hasFruitValueAtLeast(minPrice)
+    minPrice = minPrice or vars.FruitMinValueHop
+    for _, bag in ipairs({ character, backpack }) do
+        if bag then
+            for _, t in ipairs(bag:GetChildren()) do
+                if t:IsA("Tool") and (t:FindFirstChild("EatRemote", true) or t:GetAttribute("OriginalName")) then
+                    if core.getFruitPrice(t) >= minPrice then return true, t end
+                end
             end
         end
-        if not v then
-            local d = LocalPlayer:FindFirstChild("Data")
-            local m = d and (d:FindFirstChild("Beli") or d:FindFirstChild("Money"))
-            if m then v = m.Value end
-        end
-    end)
-    return v or "?"
+    end
+    return false, nil
 end
 
-local WEBHOOK_INTERVAL = 300
-local lastWebhook = 0
-local lastWebhookLvl = nil
-
-local function SendWebhook(reason)
-    if not CONFIG.Webhook or CONFIG.WebhookURL == "" then return end
-    local req = request or (syn and syn.request) or http_request
-    if not req then
-        warn("[Frozent0] request unavailable, webhook skipped")
-        return
-    end
-
-    local lvl = GetPlayerLevel() or "?"
-    local money = GetMoney()
-
-    local payload = HttpService:JSONEncode({
-        username = "Frozent0",
-        embeds = {{
-            title = "Account status" .. (reason and (" - " .. reason) or ""),
-            color = 65280,
-            fields = {
-                { name = "Player", value = tostring(LocalPlayer.Name), inline = true },
-                { name = "Level",  value = tostring(lvl),              inline = true },
-                { name = "Money",  value = tostring(money),            inline = true },
-                { name = "Server", value = "job: " .. tostring(game.JobId), inline = false },
-            },
-            footer = { text = "Frozent0 • " .. os.date("%H:%M:%S") },
-        }},
-    })
-
+function core.pickFruit(entry)
+    if not entry or not entry.Tool or not entry.Tool.Parent then return nil end
+    local handle = entry.Handle or entry.Tool:FindFirstChild("Handle")
+    if not handle or not humanoidRootPart then return nil end
+    core.SpawnTweenPart()
+    core.gotoFruit(handle.CFrame * CFrame.new(0, 5, 0))
+    task.wait(0.1)
+    humanoidRootPart.CFrame = handle.CFrame + Vector3.new(0, 2, 0)
+    if idk then idk.CFrame = humanoidRootPart.CFrame end
     pcall(function()
-        req({
-            Url = CONFIG.WebhookURL,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = payload,
-        })
+        if firetouchinterest then
+            firetouchinterest(humanoidRootPart, handle, 0)
+            task.wait(0.05)
+            firetouchinterest(humanoidRootPart, handle, 1)
+        end
     end)
+    local deadline = tick() + 3
+    while tick() < deadline do
+        local got = core.findOwnedFruitTool(entry.Id)
+        if got then return got end
+        for _, bag in ipairs({ character, backpack }) do
+            if bag then
+                for _, t in ipairs(bag:GetChildren()) do
+                    if t:IsA("Tool") and (t:GetAttribute("OriginalName") or t:FindFirstChild("EatRemote", true)) then
+                        return t
+                    end
+                end
+            end
+        end
+        task.wait(0.15)
+    end
+    return nil
 end
 
-task.spawn(function()
-    task.wait(20)
-    SendWebhook("joined")
-    lastWebhook = tick()
-    lastWebhookLvl = GetPlayerLevel()
-    while true do
-        task.wait(30)
-        local lvl = GetPlayerLevel()
-        local changed = lvl ~= lastWebhookLvl
-        if (tick() - lastWebhook >= WEBHOOK_INTERVAL) or changed then
-            SendWebhook(changed and "level up" or nil)
-            lastWebhook = tick()
-            lastWebhookLvl = lvl
-        end
+function core.storeFruit(tool)
+    if not tool or not xuynia_RF then return false end
+    local id = core.getFruitId(tool)
+    if not id then return false end
+    local ok, res = pcall(function()
+        return xuynia_RF:InvokeServer("StoreFruit", id, tool)
+    end)
+    if ok and res == true then
+        core.log("stored " .. id)
+        return true
     end
-end)
+    return false
+end
 
-task.spawn(function()
-    local deadline = tick() + 60
-    while tick() < deadline and not CommF do task.wait(0.5) end
-    if CommF then
-        pcall(function() CommF:InvokeServer("SetTeam", "Pirates") end)
-        print("[Frozent0] Team set: Pirates")
+function core.collectBestFruit()
+    local fruits = core.findWorldFruits()
+    if #fruits == 0 then return false end
+    local best = fruits[1]
+    if Config.TweenServerFruit then
+        local selected = core.findSelectedFruitEntry()
+        if selected then best = selected
+        elseif not best.Matched then return false end
     end
-end)
+    vars.FruitBusy = true
+    local tool = core.pickFruit(best)
+    if tool then core.storeFruit(tool) end
+    vars.FruitBusy = false
+    return tool ~= nil
+end
 
-task.spawn(function()
-    task.wait(15)
-    if not replicated.Remotes:FindFirstChild("Redeem") then return end
-
-    local codes = {
-        "LIGHTNINGABUSE","1LOSTADMIN","ADMINFIGHT","GIFTING_HOURS","NOMOREHACK",
-        "BANEXPLOIT","WildDares","BossBuild","GetPranked","EARN_FRUITS",
-        "SUB2GAMERROBOT_RESET1","KITT_RESET","Bignews","CHANDLER","Fudd10",
-        "fudd10_v2","Sub2UncleKizaru","FIGHT4FRUIT","kittgaming","TRIPLEABUSE",
-        "Sub2CaptainMaui","Sub2Fer999","Enyu_is_Pro","Magicbus","JCWK",
-        "Starcodeheo","Bluxxy","SUB2GAMERROBOT_EXP1","Sub2NoobMaster123",
-        "Sub2Daigrock","Axiore","TantaiGaming","StrawHatMaine","Sub2OfficialNoobie",
-        "TheGreatAce","JULYUPDATE_RESET","ADMINHACKED","SEATROLLING","24NOADMIN",
-        "ADMIN_TROLL","NEWTROLL","SECRET_ADMIN","staffbattle","NOEXPLOIT",
-        "NOOB2ADMIN","CODESLIDE","fruitconcepts","krazydares"
-    }
-
-    for _, code in ipairs(codes) do
-        task.wait(0.1)
+function core.serverHop()
+    core.log("server hop...")
+    local placeId = game.PlaceId
+    local hopped = false
+    if request then
         pcall(function()
-            replicated.Remotes.Redeem:InvokeServer(code)
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
+                placeId
+            )
+            local res = request({ Url = url, Method = "GET" })
+            if not res or not res.Body then return end
+            local data = http_Service:JSONDecode(res.Body)
+            if not data or type(data.data) ~= "table" then return end
+            local servers = {}
+            for _, s in ipairs(data.data) do
+                if s.id and s.id ~= game.JobId and (s.playing or 0) < (s.maxPlayers or 12) - 1 then
+                    table.insert(servers, s.id)
+                end
+            end
+            if #servers > 0 then
+                teleport_Service:TeleportToPlaceInstance(placeId, servers[math.random(1, #servers)], player)
+                hopped = true
+            end
         end)
     end
-    print("[Frozent0] Codes attempted")
-end)
+    if not hopped then
+        pcall(function() teleport_Service:Teleport(placeId, player) end)
+    end
+end
 
-local function Hop()
+function core.buyGacha()
     pcall(function()
-        local servers
-        local ok = pcall(function()
-            servers = HttpService:JSONDecode(game:HttpGet(
-                "https://games.roblox.com/v1/games/" .. game.PlaceId ..
-                "/servers/Public?sortOrder=Asc&limit=100"
-            ))
-        end)
-        if not ok or not servers or not servers.data then return end
-
-        local myJobId = game.JobId
-        for _, server in ipairs(servers.data) do
-            if server.id ~= myJobId and server.playing < server.maxPlayers then
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
-                task.wait(5)
-            end
+        local net = replicatedstorage_Service.Modules and replicatedstorage_Service.Modules.Net
+        local ev = net and net["RF/GachaNetworkRF"]
+        if ev then
+            ev:InvokeServer({ Context = "Purchase", BoxName = "ZiolesGacha" })
         end
     end)
 end
 
-getgenv().HopServerAdmin = true
+local pendingMobName = nil
+local _LastSpawnTravel = 0
 
-local ADMIN_NAMES = {
-    "red_game43", "rip_indra", "Axiore", "Polkster", "wenlocktoad",
-    "Daigrock", "toilamvidamme", "oofficialnoobie", "Uzoth", "Azarth",
-    "arlthmetic", "Death_King", "Lunoven", "TheGreateAced", "rip_fud",
-    "drip_mama", "layandikit12", "Hingoi"
-}
+SetAutoFarm = function(v)
+    vars.FarmEnabled = v and true or false
+    if not vars.FarmEnabled then
+        core.stopAllMovement()
+        CurrentTarget = nil
+        pendingMobName = nil
+        vars.FruitBusy = false
+        Sea2Mode = false
+        TravelActive = false
+        ZouActive = false
+        Sea3FruitHop = false
+        core.log("AutoFarm OFF — movement stopped")
+    else
+        core.resumeMovement()
+        core.log("AutoFarm ON")
+    end
+end
+SetFarmMethod = function(v)
+    if v == "Melee" or v == "Sword" or v == "Gun" then
+        vars.SelectWeapon = core.getBestWeapon(v) or vars.SelectWeapon
+        core.log("weapon → " .. tostring(vars.SelectWeapon) .. " (" .. tostring(v) .. ")")
+    elseif v == "Fruit" then
+        core.log("method → Fruit skills")
+    end
+end
+SetAutoStats = function() end
+SetFruitHop = function(v)
+    if v then vars._LastHop = 0 end
+end
+
 
 task.spawn(function()
-    local lastHopTry = 0
-    while task.wait(2) do
+    while true do
+        task.wait()
         pcall(function()
-            if not getgenv().HopServerAdmin then return end
-            if tick() - lastHopTry < 30 then return end
-            for _, v in pairs(Players:GetPlayers()) do
-                local low = (v.Name or ""):lower()
-                for _, admin in ipairs(ADMIN_NAMES) do
-                    if low == admin:lower() then
-                        UpdateStatus("Admin on server: " .. v.Name .. ", hopping")
-                        lastHopTry = tick()
-                        Hop()
+            if not vars.FarmEnabled or vars.FruitBusy then return end
+            if not idk or not idk.Parent or not humanoidRootPart then return end
+            local d = (humanoidRootPart.Position - idk.Position).Magnitude
+            if d <= 25 then
+                humanoidRootPart.CFrame = idk.CFrame
+            elseif d <= 400 and activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+            end
+            if character then
+                for _, part in pairs(character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
+                end
+            end
+            if humanoidRootPart and not humanoidRootPart:FindFirstChild("RH_BodyClip") then
+                core.SpawnTweenPart()
+            end
+        end)
+    end
+end)
+
+task.spawn(function()
+    task.wait(0.5)
+    vars.SelectWeapon = core.getBestWeapon(Config.FarmMethod) or vars.SelectWeapon
+    core.activateHaki()
+    if Config.FarmMethod ~= "Fruit" then
+        core.equipWeapon(vars.SelectWeapon)
+    end
+    core.refreshFruitPriceCache()
+    Config.MinLevel = core.getLevel()
+    core.log("farm ready | lvl=" .. tostring(core.getLevel()) .. " method=" .. tostring(Config.FarmMethod) .. " weapon=" .. tostring(vars.SelectWeapon))
+
+    while true do
+        local ok, err = pcall(function()
+            if Config.FruitHop then return end
+            if not vars.FarmEnabled then return end
+            if Sea2Mode or TravelActive or ZouActive then return end
+            if not core.inLevelRange() then
+                if vars.FarmEnabled and core.getLevel() >= (Config.MaxLevel or 2800) then
+                    if not vars._MaxLevelLogged or tick() - vars._MaxLevelLogged > 10 then
+                        vars._MaxLevelLogged = tick()
+                        core.log("MaxLevel reached (" .. tostring(Config.MaxLevel) .. ") — farm idle")
+                    end
+                    core.stopAllMovement()
+                end
+                return
+            end
+            vars._MaxLevelLogged = nil
+            if not character or not humanoid or humanoid.Health <= 0 then return end
+            if not humanoidRootPart or not humanoidRootPart.Parent then return end
+            if UWRouteBusy then return end
+
+            if vars.FruitEnabled and not vars.FruitBusy then
+                if tick() - (vars._LastFruitScan or 0) >= vars.FruitScanInterval then
+                    vars._LastFruitScan = tick()
+                    if Config.TweenServerFruit then
+                        if core.findSelectedFruitEntry() then
+                            core.collectBestFruit()
+                            return
+                        end
+                    else
+                        local world = core.findWorldFruits(vars.FruitMinValueHop)
+                        if #world > 0 then
+                            core.collectBestFruit()
+                            return
+                        end
+                    end
+                end
+            end
+
+            local progress = core.getQuestProgress()
+            local mobName = nil
+
+            if not progress then
+                if not vars._LastQuestTry or tick() - vars._LastQuestTry > 2.5 then
+                    vars._LastQuestTry = tick()
+                    local best = core.startBestQuest()
+                    if best then
+                        pendingMobName = best.PrimaryMob
+                        mobName = best.PrimaryMob
+                        core.log(string.format(
+                            "StartQuest %s | mob=%s | req=%s",
+                            tostring(best.InternalName),
+                            tostring(best.PrimaryMob),
+                            tostring(best.LevelReq)
+                        ))
+                        task.wait(0.35)
+                        local confirm = core.getQuestProgress()
+                        if confirm then
+                            core.log("quest confirmed: " .. tostring(confirm.DisplayName or confirm.InternalName))
+                        else
+                            core.log("quest tracker not updated yet, will retry")
+                        end
+                    else
+                        pendingMobName = nil
+                        core.log("no quest for level " .. tostring(core.getLevel()), true)
                         return
                     end
+                elseif pendingMobName then
+                    mobName = pendingMobName
+                else
+                    return
+                end
+            else
+                if progress.Finished then
+                    core.log("quest finished")
+                    CurrentTarget = nil
+                    pendingMobName = nil
+                    pcall(function() xuynia_RF:InvokeServer("AbandonQuest") end)
+                    task.wait(0.4)
+                    vars._LastQuestTry = 0
+                    return
+                end
+                for _, t in ipairs(progress.Targets) do
+                    if not t.Done then
+                        mobName = t.Name
+                        break
+                    end
+                end
+                mobName = mobName or progress.PrimaryMob
+                pendingMobName = mobName
+            end
+
+            if not mobName then return end
+            if vars.Tweening then return end
+
+            local deep = core.IsDeepFishmanMob(mobName)
+            if deep and not core.InUnderwater() then
+                core.EnterUnderwaterCity()
+                return
+            elseif not deep and core.InUnderwater() then
+                core.ExitUnderwaterCity()
+                return
+            end
+
+            local target = CurrentTarget
+            if target then
+                if not target.Parent or not core.IsAlive(target) then
+                    CurrentTarget = nil
+                    target = nil
+                elseif target.Name ~= mobName then
+                    CurrentTarget = nil
+                    target = nil
+                end
+            end
+
+            if not target then
+                target = core.getClosestMob(mobName)
+                if target then
+                    CurrentTarget = target
+                    core.log("lock " .. target.Name)
+                else
+                    if tick() - _LastSpawnTravel > 3 and not vars.Tweening then
+                        _LastSpawnTravel = tick()
+                        local spawnCF = core.getMobSpawnCFrame(mobName)
+                        if spawnCF then
+                            core.log("no mobs → EnemySpawn for " .. tostring(mobName))
+                            core.gotoQuest(spawnCF * CFrame.new(0, 25, 0))
+                        else
+                            core.log("no EnemySpawn for " .. tostring(mobName), true)
+                        end
+                    end
+                    return
+                end
+            end
+
+            core.AnchorAboveMob(target)
+            local hrp = target:FindFirstChild("HumanoidRootPart")
+            if hrp and humanoidRootPart then
+                local ay = (Config.FarmMethod == "Fruit") and (vars.FruitAttackY or 10) or (vars.AttackY or 12)
+                if Config.FarmMethod == "Gun" then ay = 8 end
+                local want = hrp.Position + Vector3.new(0, ay, 0)
+                local dist = (humanoidRootPart.Position - want).Magnitude
+                if dist <= (vars.SettleRange or 15) then
+                    core.attack(target)
                 end
             end
         end)
+        if not ok then core.log("farm loop error: " .. tostring(err), true) end
+        task.wait(0.05)
     end
 end)
 
-task.spawn(function()
-    repeat task.wait() until game:IsLoaded()
-    LocalPlayer.Idled:Connect(function()
-        pcall(function()
-            VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-            task.wait(1)
-            VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
-        end)
-    end)
-end)
-
-local function HakiOwned(hakiName)
-    local ok, owned = pcall(function()
-        local ch = LocalPlayer.Character
-        local bp = LocalPlayer.Backpack
-        if hakiName == "Buso" then
-            if ch and ch:FindFirstChild("HasBuso") then return true end
-            return false
-        end
-        if ch and (ch:FindFirstChild(hakiName) or ch:FindFirstChild("Has" .. hakiName)) then return true end
-        if bp and bp:FindFirstChild(hakiName) then return true end
-        return false
-    end)
-    return ok and owned or false
-end
-
-local HakiBuyFlags = { Buso = false, Soru = false, Geppo = false }
 
 task.spawn(function()
-    local deadline = tick() + 90
-    while tick() < deadline and not CommF do task.wait(0.5) end
-    if not CommF then return end
-    task.wait(5)
-
-    if not HakiBuyFlags.Buso and not HakiOwned("Buso") then
-        pcall(function() CommF:InvokeServer("BuyHaki", "Buso") end)
-        HakiBuyFlags.Buso = true
-        print("[Frozent0] BuyHaki Buso sent")
-    end
-    if not HakiBuyFlags.Soru and not HakiOwned("Soru") then
-        pcall(function() CommF:InvokeServer("BuyHaki", "Soru") end)
-        HakiBuyFlags.Soru = true
-        print("[Frozent0] BuyHaki Soru sent")
-    end
-    if not HakiBuyFlags.Geppo and not HakiOwned("Geppo") then
-        pcall(function() CommF:InvokeServer("BuyHaki", "Geppo") end)
-        HakiBuyFlags.Geppo = true
-        print("[Frozent0] BuyHaki Geppo sent")
-    end
-end)
-
-task.spawn(function()
-    while task.wait(0.5) do
-        if not _G.Level then continue end
-        pcall(function()
-            local ch = LocalPlayer.Character
-            if not ch then return end
-            if not ch:FindFirstChild("HasBuso") then
-                local hum = ch:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    pcall(function() CommF:InvokeServer("Buso") end)
-                end
-            end
-        end)
-    end
-end)
-
-local pSats = 10
-
-local function statsSetings(Num, value)
-    local data = LocalPlayer:FindFirstChild("Data")
-    local points = data and data:FindFirstChild("Points")
-    if not points or points.Value == 0 then return end
-    if CommF then
-        if Num == "Melee" then
-            CommF:InvokeServer("AddPoint", "Melee", value)
-        elseif Num == "Defense" then
-            CommF:InvokeServer("AddPoint", "Defense", value)
-        elseif Num == "Sword" then
-            CommF:InvokeServer("AddPoint", "Sword", value)
-        elseif Num == "Gun" then
-            CommF:InvokeServer("AddPoint", "Gun", value)
-        elseif Num == "Devil" then
-            CommF:InvokeServer("AddPoint", "Demon Fruit", value)
-        end
-    end
-end
-
-task.spawn(function()
-    while task.wait(Sec) do
-        pcall(function()
-            if _G.Level and _G.Auto_Melee then
-                statsSetings("Melee", pSats)
-            end
-        end)
-    end
-end)
-
-local sea2Stage = 0
-local Sea2Mode = false
-local Sea2Announced = false
-local Sea2StuckCount = 0
-local SEA2_STUCK_LIMIT = 20
-
-task.spawn(function()
-    while task.wait(Sec) do
-        pcall(function()
-            if not _G.Level then
+    while task.wait(0.06) do
+        local ok, err = pcall(function()
+            if not vars.FarmEnabled then
                 Sea2Mode = false
                 TravelActive = false
                 return
             end
-            local lvl = GetPlayerLevel() or 0
-            if not World1 or lvl < SEA2_MIN_LEVEL then
+            local lvl = core.getLevel()
+            if not core.isWorld1() or lvl < SEA2_MIN_LEVEL then
                 Sea2Mode = false
                 Sea2Announced = false
                 TravelActive = false
                 return
             end
-            if not CommF then
+            if not xuynia_RF then
                 Sea2StuckCount = Sea2StuckCount + 1
                 if Sea2StuckCount >= SEA2_STUCK_LIMIT then
-                    UpdateStatus("Sea 2: CommF_ missing too long, hopping")
+                    core.log("Sea 2: CommF_ missing, hop")
                     Sea2StuckCount = 0
-                    Hop()
+                    core.serverHop()
                 end
                 return
             end
@@ -1830,20 +1472,15 @@ task.spawn(function()
             Sea2Mode = true
             TravelActive = true
 
-            if GetCurrentQuest() then
-                pcall(function() CommF:InvokeServer("AbandonQuest") end)
-                ResetQuestState()
-            end
+            pcall(function() xuynia_RF:InvokeServer("AbandonQuest") end)
 
             if not Sea2Announced then
                 Sea2Announced = true
-                UpdateStatus("Sea 2 trigger active (lvl " .. tostring(lvl) .. "), quest farming halted")
+                core.log("Sea 2 active (lvl " .. tostring(lvl) .. ") — quest farm paused")
             end
 
             local door, doorPart = nil, nil
-            pcall(function()
-                door = workspace.Map.Ice.Door
-            end)
+            pcall(function() door = workspace.Map.Ice.Door end)
             if door then
                 if door:IsA("BasePart") then
                     doorPart = door
@@ -1865,225 +1502,193 @@ task.spawn(function()
 
             if doorState == "locked" then
                 if sea2Stage == 0 then
-                    UpdateStatus("Sea 2: requesting key from Detective")
-                    pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
+                    core.log("Sea 2: key from Detective")
+                    pcall(function() xuynia_RF:InvokeServer("DressrosaQuestProgress", "Detective") end)
                     sea2Stage = 1
                 elseif sea2Stage == 1 then
-                    _tp(SEA2_DOOR_CF)
-                    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if root and (root.Position - SEA2_DOOR_CF.Position).Magnitude <= 15 then
+                    core.gotoQuest(SEA2_DOOR_CF)
+                    if humanoidRootPart and (humanoidRootPart.Position - SEA2_DOOR_CF.Position).Magnitude <= 15 then
                         sea2Stage = 2
                     else
                         Sea2StuckCount = Sea2StuckCount + 1
                         if Sea2StuckCount >= SEA2_STUCK_LIMIT then
-                            UpdateStatus("Sea 2: cannot reach door, hopping")
+                            core.log("Sea 2: cannot reach door, hop")
                             Sea2StuckCount = 0
-                            Hop()
+                            core.serverHop()
                         end
                     end
                 elseif sea2Stage == 2 then
-                    UpdateStatus("Sea 2: using key")
-                    EquipWeapon("Key")
-                    pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
+                    core.log("Sea 2: UseKey")
+                    core.equipWeapon("Key")
+                    pcall(function() xuynia_RF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
                     task.wait(1)
                     if not (doorPart.CanCollide == true and doorPart.Transparency == 0) then
                         sea2Stage = 0
-                        UpdateStatus("Sea 2: door unlocked")
+                        core.log("Sea 2: door unlocked")
                     else
                         Sea2StuckCount = Sea2StuckCount + 1
                         if Sea2StuckCount >= SEA2_STUCK_LIMIT then
-                            UpdateStatus("Sea 2: UseKey does not unlock door, hopping")
+                            core.log("Sea 2: UseKey failed, hop")
                             Sea2StuckCount = 0
-                            Hop()
+                            core.serverHop()
                         end
                     end
                 end
 
             elseif doorState == "open" then
                 sea2Stage = 0
-                UpdateStatus("Sea 2: killing Ice Admiral")
-
-                local adm = GetConnectionEnemies("Ice Admiral")
-                if adm and Attack.Alive(adm) then
+                core.log("Sea 2: kill Ice Admiral")
+                local adm = core.getConnectionEnemy("Ice Admiral")
+                if adm and core.IsAlive(adm) then
                     Sea2StuckCount = 0
-                    Attack.Kill(adm, true)
+                    core.AnchorAboveMob(adm)
+                    core.attack(adm)
                 else
                     local en = workspace:FindFirstChild("Enemies")
                     local dead = en and en:FindFirstChild("Ice Admiral")
                     if dead and dead:FindFirstChildOfClass("Humanoid") and dead.Humanoid.Health <= 0 then
-                        pcall(function() CommF:InvokeServer("TravelDressrosa") end)
+                        pcall(function() xuynia_RF:InvokeServer("TravelDressrosa") end)
                         task.wait(2)
-                        if World1 then
+                        if core.isWorld1() then
                             Sea2StuckCount = Sea2StuckCount + 1
                             if Sea2StuckCount >= 3 then
-                                UpdateStatus("Sea 2: TravelDressrosa failed 3x, hopping")
+                                core.log("Sea 2: TravelDressrosa failed, hop")
                                 Sea2StuckCount = 0
-                                Hop()
+                                core.serverHop()
                             end
                         else
                             Sea2StuckCount = 0
+                            TravelActive = false
+                            Sea2Mode = false
                         end
                     else
                         Sea2StuckCount = Sea2StuckCount + 1
                         if Sea2StuckCount >= SEA2_STUCK_LIMIT then
-                            UpdateStatus("Sea 2: Ice Admiral not spawning, hopping")
+                            core.log("Sea 2: Ice Admiral not spawning, hop")
                             Sea2StuckCount = 0
-                            Hop()
+                            core.serverHop()
                         else
-                            UpdateStatus("Sea 2: waiting for Ice Admiral spawn")
-                            _tp(SEA2_DOOR_CF)
+                            core.gotoQuest(SEA2_DOOR_CF)
                         end
                     end
                 end
 
             elseif doorState == "unknown" then
-                UpdateStatus("Sea 2: door state unknown (CanCollide=" ..
-                    tostring(doorPart.CanCollide) .. ", Transparency=" ..
-                    tostring(doorPart.Transparency) .. "), trying travel")
-                pcall(function() CommF:InvokeServer("TravelDressrosa") end)
+                pcall(function() xuynia_RF:InvokeServer("TravelDressrosa") end)
                 task.wait(2)
-                if World1 then
+                if core.isWorld1() then
                     Sea2StuckCount = Sea2StuckCount + 1
                     if Sea2StuckCount >= SEA2_STUCK_LIMIT then
-                        UpdateStatus("Sea 2: unknown door state persists, hopping")
                         Sea2StuckCount = 0
-                        Hop()
+                        core.serverHop()
                     end
                 else
                     Sea2StuckCount = 0
                     TravelActive = false
+                    Sea2Mode = false
                 end
 
             else
-                UpdateStatus("Sea 2: door not found, fallback chain")
-                pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "Detective") end)
+                pcall(function() xuynia_RF:InvokeServer("DressrosaQuestProgress", "Detective") end)
                 task.wait(0.3)
-                pcall(function() CommF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
+                pcall(function() xuynia_RF:InvokeServer("DressrosaQuestProgress", "UseKey") end)
                 task.wait(0.5)
-                pcall(function() CommF:InvokeServer("TravelDressrosa") end)
+                pcall(function() xuynia_RF:InvokeServer("TravelDressrosa") end)
                 task.wait(1)
-                if World1 then
+                if core.isWorld1() then
                     Sea2StuckCount = Sea2StuckCount + 1
                     if Sea2StuckCount >= SEA2_STUCK_LIMIT then
-                        UpdateStatus("Sea 2: fallback chain failed, hopping")
                         Sea2StuckCount = 0
-                        Hop()
+                        core.serverHop()
                     end
                 else
                     Sea2StuckCount = 0
                     TravelActive = false
+                    Sea2Mode = false
                 end
-
-                local adm = GetConnectionEnemies("Ice Admiral")
+                local adm = core.getConnectionEnemy("Ice Admiral")
                 if adm then
-                    Attack.Kill(adm, true)
+                    core.AnchorAboveMob(adm)
+                    core.attack(adm)
                 end
             end
         end)
+        if not ok then
+            core.log("Sea2 error: " .. tostring(err), true)
+        end
     end
 end)
 
-local PLATES = {
-    CFrame.new(-1850.49329, 13.1789551, 1750.89685),
-    CFrame.new(-1858.87305, 19.3777466, 1712.01807),
-    CFrame.new(-1803.94324, 16.5789185, 1750.89685),
-    CFrame.new(-1858.55835, 16.8604317, 1724.79541),
-    CFrame.new(-1869.54224, 15.987854, 1681.00659),
-    CFrame.new(-1800.0979, 16.4978027, 1684.52368),
-    CFrame.new(-1819.26343, 14.795166, 1717.90625),
-    CFrame.new(-1813.51843, 14.8604736, 1724.79541),
-}
-local plateIndex = 1
 
-local function TryTrevor()
-    if not CommF then return end
-    pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "1") end)
-    task.wait(0.1)
-    pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "2") end)
-    task.wait(0.1)
-    pcall(function() CommF:InvokeServer("F_", "TalkTrevor", "3") end)
-end
-
-local ZOU_CACHE_TTL = 3
-local zouCache = {
-    progress = -1,
-    t = 0,
-    stored = {},
-    openable = {},
-    unlockables = nil,
-    u_t = 0,
-}
-
-local function GetBartiloCached()
+local function GetBartiloProgress()
     local now = tick()
     if now - zouCache.t > ZOU_CACHE_TTL then
         pcall(function()
-            zouCache.progress = CommF:InvokeServer("BartiloQuestProgress", "Bartilo") or -1
+            zouCache.progress = xuynia_RF:InvokeServer("BartiloQuestProgress", "Bartilo") or -1
         end)
         zouCache.t = now
     end
     return zouCache.progress
 end
 
-local function GetStoredFruits()
-    local now = tick()
-    if now - zouCache.t > ZOU_CACHE_TTL then
-        local stored = {}
-        pcall(function()
-            local inv = CommF:InvokeServer("getInventoryFruits")
-            if type(inv) == "table" then
-                for _, v in pairs(inv) do
-                    if type(v) == "table" and v.Name then
-                        table.insert(stored, v.Name)
-                    end
-                end
-            end
-        end)
-        zouCache.stored = stored
-        zouCache.t = now
-    end
-    return zouCache.stored
-end
-
-local function GetOpenableFruits()
-    local now = tick()
-    if now - zouCache.t > ZOU_CACHE_TTL then
-        local openable = {}
-        pcall(function()
-            local fruits = CommF:InvokeServer("GetFruits")
-            if type(fruits) == "table" then
-                for _, v in pairs(fruits) do
-                    if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
-                        table.insert(openable, v.Name)
-                    end
-                end
-            end
-        end)
-        zouCache.openable = openable
-        zouCache.t = now
-    end
-    return zouCache.openable
-end
-
 local function GetUnlockablesCached()
     local now = tick()
     if now - zouCache.u_t > ZOU_CACHE_TTL then
         pcall(function()
-            zouCache.unlockables = CommF:InvokeServer("GetUnlockables")
+            zouCache.unlockables = xuynia_RF:InvokeServer("GetUnlockables")
         end)
         zouCache.u_t = now
     end
     return zouCache.unlockables
 end
 
-local function FindGroundFruit()
+local function GetStoredFruitsSea3()
+    local stored = {}
+    pcall(function()
+        local inv = xuynia_RF:InvokeServer("getInventoryFruits")
+        if type(inv) == "table" then
+            for _, v in pairs(inv) do
+                if type(v) == "table" and v.Name then
+                    table.insert(stored, v.Name)
+                end
+            end
+        end
+    end)
+    return stored
+end
+
+local function GetOpenableFruitsSea3()
+    local openable = {}
+    pcall(function()
+        local fruits = xuynia_RF:InvokeServer("GetFruits")
+        if type(fruits) == "table" then
+            for _, v in pairs(fruits) do
+                if type(v) == "table" and v.Price and v.Price >= 1000000 and v.Name then
+                    table.insert(openable, v.Name)
+                end
+            end
+        end
+    end)
+    return openable
+end
+
+local function TryTrevor()
+    if not xuynia_RF then return end
+    pcall(function() xuynia_RF:InvokeServer("F_", "TalkTrevor", "1") end)
+    task.wait(0.1)
+    pcall(function() xuynia_RF:InvokeServer("F_", "TalkTrevor", "2") end)
+    task.wait(0.1)
+    pcall(function() xuynia_RF:InvokeServer("F_", "TalkTrevor", "3") end)
+end
+
+local function FindGroundSea3Fruit()
     for _, obj in ipairs(workspace:GetChildren()) do
         if obj:IsA("Model") or obj:IsA("Tool") then
             local name = obj.Name
             local matched = nil
-            for _, allowed in ipairs(CONFIG.AllowedSea3Fruits) do
+            for _, allowed in ipairs(ALLOWED_SEA3_FRUITS) do
                 local display = allowed:split("-")[1]
-                if name == (display .. " Fruit") or name:find(display, 1, true) then
+                if name == (display .. " Fruit") or string.find(name, display, 1, true) then
                     matched = allowed
                     break
                 end
@@ -2100,226 +1705,267 @@ local function FindGroundFruit()
     return nil, nil
 end
 
-local Sea3FruitHop = false
-
 task.spawn(function()
     while task.wait(0.5) do
-        if not Sea3FruitHop then continue end
-        if not _G.Level then continue end
-
-        local found, handle = FindGroundFruit()
+        if not Sea3FruitHop or not vars.FarmEnabled then continue end
+        local found, handle = FindGroundSea3Fruit()
         if found and handle then
-            UpdateStatus("Sea 3: fruit found on ground, flying to it")
-            local targetCF = handle.CFrame
-            _tp(targetCF)
-
+            core.log("Sea 3: fruit on ground → " .. tostring(found.Name))
+            core.gotoFruit(handle.CFrame)
             local deadline = tick() + 30
-            while tick() < deadline do
-                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if not root then break end
-                if handle.Parent and (root.Position - handle.Position).Magnitude <= SEA3_FRUIT_PICK_RADIUS then
-                    task.wait(0.5)
-                    if not found.Parent then
-                        UpdateStatus("Sea 3: fruit collected, stopping hop")
-                        Sea3FruitHop = false
-                        break
-                    end
-                    pcall(function()
-                        local hrp = root
-                        hrp.CFrame = handle.CFrame
-                    end)
-                end
+            while tick() < deadline and Sea3FruitHop do
                 if not found.Parent then
-                    UpdateStatus("Sea 3: fruit collected, stopping hop")
                     Sea3FruitHop = false
                     break
                 end
-                if activeTarget and handle.Parent and (activeTarget.Position - handle.Position).Magnitude > 20 then
-                    _tp(handle.CFrame, true)
+                if humanoidRootPart and handle.Parent
+                    and (humanoidRootPart.Position - handle.Position).Magnitude <= 12 then
+                    pcall(function() humanoidRootPart.CFrame = handle.CFrame end)
+                    task.wait(0.5)
                 end
                 task.wait(0.2)
             end
         else
-            local deadline = tick() + SEA3_FRUIT_HOP_DELAY
+            local deadline = tick() + 20
             while tick() < deadline and Sea3FruitHop do
-                local found2, handle2 = FindGroundFruit()
-                if found2 then break end
+                if FindGroundSea3Fruit() then break end
                 task.wait(0.5)
             end
             if Sea3FruitHop then
-                UpdateStatus("Sea 3: no allowed fruit on ground, hopping")
-                Hop()
+                core.log("Sea 3: no allowed fruit → hop")
+                core.serverHop()
             end
         end
     end
 end)
 
 task.spawn(function()
-    while task.wait(Sec) do
-        pcall(function()
+    while task.wait(0.06) do
+        local ok, err = pcall(function()
             ZouActive = false
-            if not _G.Level then return end
-            local lvl = GetPlayerLevel() or 0
-            if not (World2 and lvl >= SEA3_MIN_LEVEL) then
-                ZouActive = false
+            if not vars.FarmEnabled then return end
+            local lvl = core.getLevel()
+            if not (core.isWorld2() and lvl >= SEA3_MIN_LEVEL) then
                 return
             end
-            if not CommF then return end
+            if not xuynia_RF then return end
             ZouActive = true
 
-            local progress = GetBartiloCached()
-
+            local progress = GetBartiloProgress()
             if progress ~= 2 then plateIndex = 1 end
 
             if progress == 3 then
                 local unlockables = GetUnlockablesCached()
-
                 if unlockables and unlockables.FlamingoAccess ~= nil then
                     Sea3FruitHop = false
-                    pcall(function() CommF:InvokeServer("F_", "TravelZou") end)
-
+                    pcall(function() xuynia_RF:InvokeServer("F_", "TravelZou") end)
                     local zcheck = -1
-                    pcall(function() zcheck = CommF:InvokeServer("ZQuestProgress", "Check") end)
-
+                    pcall(function() zcheck = xuynia_RF:InvokeServer("ZQuestProgress", "Check") end)
                     if zcheck == 0 then
-                        local indra = GetConnectionEnemies("rip_indra")
+                        local indra = core.getConnectionEnemy("rip_indra")
                         if indra then
-                            Attack.Kill(indra, true)
+                            core.AnchorAboveMob(indra)
+                            core.attack(indra)
                         else
-                            pcall(function() CommF:InvokeServer("F_", "ZQuestProgress", "Begin") end)
+                            pcall(function() xuynia_RF:InvokeServer("F_", "ZQuestProgress", "Begin") end)
                         end
-
                     elseif zcheck == 1 then
-                        pcall(function() CommF:InvokeServer("F_", "TravelZou") end)
-
+                        pcall(function() xuynia_RF:InvokeServer("F_", "TravelZou") end)
                     else
-                        local swan = GetConnectionEnemies("Don Swan")
+                        local swan = core.getConnectionEnemy("Don Swan")
                         if swan then
-                            Attack.Kill(swan, true)
+                            core.AnchorAboveMob(swan)
+                            core.attack(swan)
                         else
-                            _tp(CFrame.new(2288.802, 15.1870775, 863.034607))
+                            core.gotoQuest(CFrame.new(2288.802, 15.1870775, 863.034607))
                         end
                     end
-
                 else
-                    local stored = GetStoredFruits()
-                    local openable = GetOpenableFruits()
+                    local stored = GetStoredFruitsSea3()
+                    local openable = GetOpenableFruitsSea3()
                     local usable = false
-
                     for _, fruitName in pairs(openable) do
                         for _, storedName in pairs(stored) do
-                            if fruitName == storedName and table.find(CONFIG.AllowedSea3Fruits, storedName) then
-                                usable = true
-                                if not LocalPlayer.Backpack:FindFirstChild(storedName) then
-                                    pcall(function() CommF:InvokeServer("F_", "LoadFruit", storedName) end)
-                                    UpdateStatus("Sea 3: loaded " .. storedName .. " from storage")
-                                else
-                                    TryTrevor()
+                            if fruitName == storedName then
+                                local allowed = false
+                                for _, a in ipairs(ALLOWED_SEA3_FRUITS) do
+                                    if a == storedName then allowed = true break end
+                                end
+                                if allowed then
+                                    usable = true
+                                    if not (backpack and backpack:FindFirstChild(storedName)) then
+                                        pcall(function() xuynia_RF:InvokeServer("F_", "LoadFruit", storedName) end)
+                                        core.log("Sea 3: load " .. storedName)
+                                    else
+                                        TryTrevor()
+                                    end
                                 end
                             end
                         end
                     end
-
                     if usable then return end
-
                     local hasBackpackFruit = false
-                    for _, allowed in ipairs(CONFIG.AllowedSea3Fruits) do
-                        if LocalPlayer.Backpack:FindFirstChild(allowed) then
-                            hasBackpackFruit = true
-                            break
+                    if backpack then
+                        for _, allowed in ipairs(ALLOWED_SEA3_FRUITS) do
+                            if backpack:FindFirstChild(allowed) then
+                                hasBackpackFruit = true
+                                break
+                            end
                         end
                     end
-
                     if hasBackpackFruit then
                         TryTrevor()
                         return
                     end
-
                     if not Sea3FruitHop then
-                        UpdateStatus("Sea 3: no allowed fruit in storage or backpack, starting server hop for ground fruits")
+                        core.log("Sea 3: need 1M+ fruit for Trevor → hop")
                         Sea3FruitHop = true
-                        UpdStFruit()
-                        Hop()
+                        core.serverHop()
                     end
                 end
 
             elseif progress == 0 then
-                local q = GetCurrentQuestCached()
-                local qtext = q and ((q.Name or "") .. " " .. (q.Target or "")) or ""
-                if TextHas(qtext, "Swan Pirates") and TextHas(qtext, "50") then
-                    local sp = FindMob("Swan Pirate")
+                local q = core.getQuestProgress()
+                local qtext = ""
+                if q then
+                    qtext = string.lower(tostring(q.DisplayName or "") .. " " .. tostring(q.PrimaryMob or ""))
+                end
+                if string.find(qtext, "swan") and string.find(qtext, "pirate") then
+                    local sp = core.getClosestMob("Swan Pirate")
                     if sp then
-                        Attack.Kill(sp, true)
+                        core.AnchorAboveMob(sp)
+                        core.attack(sp)
                     else
-                        _tp(CFrame.new(1057.92761, 137.614319, 1242.08069))
+                        core.gotoQuest(CFrame.new(1057.92761, 137.614319, 1242.08069))
                     end
                 else
-                    _tp(CFrame.new(-456.28952, 73.0200958, 299.895966))
+                    core.gotoQuest(CFrame.new(-456.28952, 73.0200958, 299.895966))
                 end
 
             elseif progress == 1 then
-                local jeremy = GetConnectionEnemies("Jeremy")
+                local jeremy = core.getConnectionEnemy("Jeremy")
                 if jeremy then
-                    Attack.Kill(jeremy, true)
+                    core.AnchorAboveMob(jeremy)
+                    core.attack(jeremy)
                 else
-                    _tp(CFrame.new(2099.88159, 448.931, 648.997375))
+                    core.gotoQuest(CFrame.new(2099.88159, 448.931, 648.997375))
                 end
 
             elseif progress == 2 then
-                _tp(CFrame.new(-1836, 11, 1714))
-
-                local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if root and (root.Position - PLATES[plateIndex].Position).Magnitude <= 8 then
-                    notween(PLATES[plateIndex])
-                    plateIndex += 1
+                core.gotoQuest(CFrame.new(-1836, 11, 1714))
+                if humanoidRootPart and (humanoidRootPart.Position - PLATES[plateIndex].Position).Magnitude <= 8 then
+                    humanoidRootPart.CFrame = PLATES[plateIndex]
+                    plateIndex = plateIndex + 1
                     if plateIndex > #PLATES then plateIndex = 1 end
-                elseif root then
-                    _tp(PLATES[plateIndex])
+                elseif humanoidRootPart then
+                    core.gotoQuest(PLATES[plateIndex])
                 end
             end
         end)
+        if not ok then
+            core.log("Sea3 error: " .. tostring(err), true)
+        end
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    pcall(function() block.CFrame = LocalPlayer.Character.PrimaryPart.CFrame end)
+
+task.spawn(function()
+    local stat_map = {
+        Melee = "Melee", Defense = "Defense", Sword = "Sword",
+        Gun = "Gun", Fruit = "Demon Fruit",
+    }
+    while true do
+        task.wait(0.25)
+        if Config.AutoStats and not Config.FruitHop then
+            local points = core.getPoints()
+            if points > 0 then
+                local eligible = {}
+                for key, enabled in pairs(Config.AutoStat) do
+                    if enabled then
+                        local rn = stat_map[key] or key
+                        if core.getStatValue(rn) < STAT_MAX then
+                            table.insert(eligible, rn)
+                        end
+                    end
+                end
+                for _, rn in ipairs(eligible) do
+                    if core.getPoints() <= 0 then break end
+                    if core.getStatValue(rn) < STAT_MAX then
+                        core.UpgradeStat(rn, 1)
+                        task.wait(0.08)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if Config.AutoBuyGacha then
+            core.buyGacha()
+            task.wait(GACHA_INTERVAL)
+        end
+    end
+end)
+
+
+task.spawn(function()
+    task.wait(1)
+    while true do
+        task.wait(1)
+        if Config.FruitHop and tick() - vars._LastHop >= 10 then
+            pcall(function()
+                vars.FruitBusy = true
+                local stored = 0
+                while Config.FruitHop do
+                    local entry = core.findSelectedFruitEntry()
+                    if not entry then break end
+                    local tool = core.pickFruit(entry)
+                    if tool and core.storeFruit(tool) then stored += 1 else break end
+                    task.wait(0.5)
+                end
+                vars.FruitBusy = false
+                vars._LastHop = tick()
+                core.serverHop()
+            end)
+            vars.FruitBusy = false
+            vars._LastHop = tick()
+        end
+    end
+end)
+
+player.CharacterAdded:Connect(function(new_Character)
+    character = new_Character
+    humanoid = character:WaitForChild("Humanoid", 10)
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
+    backpack = player:WaitForChild("Backpack", 10)
+    vars.BodyClip = nil
+    idk = nil
+    CurrentTarget = nil
+    vars.FruitBusy = false
+    vars.Tweening = false
     activeTween, activeTarget = nil, nil
-    wdLastBlockPos, wdStuckTime = nil, 0
     UWRouteBusy = false
-    EntHighlight, EntBillboard = nil, nil
-    CompleteStallSince = nil
     sea2Stage = 0
     Sea2Mode = false
     Sea2StuckCount = 0
     Sea2Announced = false
     TravelActive = false
     ZouActive = false
-    questCache, questCacheT = nil, 0
-    zouCache.progress = -1
-    zouCache.t = 0
-    zouCache.u_t = 0
-    ResetQuestState()
     plateIndex = 1
-    table.clear(DamageConfirmed)
-    table.clear(DamageHP)
-    table.clear(DamageHPLast)
-    table.clear(BringFails)
-    table.clear(BringLastChk)
-    table.clear(BringStuck)
-    table.clear(NoBring)
-    table.clear(HitOrder)
-    table.clear(PhantomBlocked)
-
-    task.wait(1)
-    pcall(function()
-        if LocalPlayer.Character and CommF then
-            CommF:InvokeServer("Buso")
-            print("[Frozent0] Buso re-applied after respawn")
-        end
-    end)
+    task.wait(0.6)
+    core.activateHaki()
+    if Config.FarmMethod ~= "Fruit" then
+        core.equipWeapon(vars.SelectWeapon)
+    end
 end)
 
-print("[Frozent0] Config Edition loaded | AutoFarm: " .. tostring(CONFIG.AutoFarm)
-    .. " | Webhook: " .. tostring(CONFIG.Webhook)
-    .. " | Sea3Fruits: " .. tostring(#CONFIG.AllowedSea3Fruits))
+questUpdate_RE.OnClientEvent:Connect(function(data)
+    ActiveQuest = data
+    if guideM.Data then guideM.Data.QuestData = data end
+end)
+
+core.log("script loaded")
