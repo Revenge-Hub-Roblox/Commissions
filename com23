@@ -247,8 +247,8 @@ local QUEST_MOVE_SPEED = 200
 local activeTween, activeTarget = nil, nil
 local shouldTween = true
 local UW_X = 50000
-local UW_ENTER = Vector3.new(4050.31, -5, -1814.12)
-local UW_CITY_EXIT = Vector3.new(61170.05, -5, 1952.83)
+local UW_ENTER = Vector3.new(4050.31, -3, -1814.12)
+local UW_CITY_EXIT = Vector3.new(61170.05, -3, 1952.83)
 local UW_OUT = Vector3.new(4050, 30, -1814)
 local UW_QUESTSPOT = Vector3.new(61122, 25, 1569)
 local UW_REMOTE_EVERY = 1.5
@@ -1374,22 +1374,79 @@ function core.goto(pos)
     core.gotoQuest(pos)
 end
 
+function core.getAttackHeight()
+    if Config.FarmMethod == "Gun" then return 8 end
+    if Config.FarmMethod == "Fruit" then return vars.FruitAttackY or 10 end
+    return vars.AttackY or 12
+end
+
+
+local _mobStableY = setmetatable({}, { __mode = "k" })
+
+function core.getMobLockCFrame(mob)
+    if not mob or not mob.Parent then return nil end
+    local hrp = mob:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    local p = hrp.Position
+    local prev = _mobStableY[mob]
+    local y = p.Y
+    if prev ~= nil then
+        local dy = y - prev
+        if dy > 6 then
+            y = prev
+        elseif dy > 0 then
+            y = prev + math.min(dy, 2)
+        else
+            y = prev + math.max(dy, -20)
+        end
+    end
+    _mobStableY[mob] = y
+    return CFrame.new(p.X, y + core.getAttackHeight(), p.Z)
+end
+
+
+function core.horizDist(a, b)
+    local dx = a.X - b.X
+    local dz = a.Z - b.Z
+    return math.sqrt(dx * dx + dz * dz)
+end
+
+
 function core.AnchorAboveMob(mob)
     if typeof(mob) ~= "Instance" or not mob:IsA("Model") then return false end
     if not core.IsAlive(mob) then return false end
-    local hrp = mob:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    local ay = (Config.FarmMethod == "Fruit") and (vars.FruitAttackY or 10) or (vars.AttackY or 12)
-    if Config.FarmMethod == "Gun" then ay = 8 end
-    local targetCF = hrp.CFrame * CFrame.new(0, ay, 0)
+    if not humanoidRootPart then return false end
+    local cf = core.getMobLockCFrame(mob)
+    if not cf then return false end
     if not core.SpawnTweenPart() then return false end
-    local d = (humanoidRootPart.Position - targetCF.Position).Magnitude
-    if d > (vars.SettleRange or 15) then
-        core.gotoQuest(targetCF)
+
+    local settle = vars.SettleRange or 15
+
+    local hd = core.horizDist(humanoidRootPart.Position, cf.Position)
+
+    if hd > settle then
+        local needRetarget = true
+        if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing
+            and activeTarget then
+            local goalHd = core.horizDist(activeTarget.Position, cf.Position)
+            if goalHd < 12 then
+                needRetarget = false
+            end
+        end
+        if needRetarget then
+            core.gotoQuest(cf, true)
+        end
     else
-        humanoidRootPart.CFrame = targetCF
-        if idk then idk.CFrame = targetCF end
-        if vars.BodyClip then vars.BodyClip.Velocity = Vector3.zero end
+        if activeTween and activeTween.PlaybackState == Enum.PlaybackState.Playing then
+            pcall(function() activeTween:Cancel() end)
+            activeTween = nil
+            vars.Tweening = false
+        end
+        humanoidRootPart.CFrame = cf
+        if idk then idk.CFrame = cf end
+        if vars.BodyClip then
+            vars.BodyClip.Velocity = Vector3.zero
+        end
     end
     return true
 end
@@ -1414,9 +1471,9 @@ function core.EnterUnderwaterCity()
     if UWRouteBusy then return false end
     UWRouteBusy = true
     local ok = false
-    local targetCF = CFrame.new(UW_ENTER + Vector3.new(0, 4, 0))
-    core.log("Fishman: flying to cavern entrance")
-    core.gotoQuest(targetCF, true)
+    local targetCF = CFrame.new(UW_ENTER)
+    core.log("Fishman: flying to whirlpool " .. tostring(UW_ENTER))
+    core.gotoQuest(targetCF, true, true, 8)
     local lastFire = 0
     local deadline = tick() + UW_MAX_TIME
     while tick() < deadline do
@@ -1426,10 +1483,18 @@ function core.EnterUnderwaterCity()
             core.log("Fishman: inside underwater city")
             break
         end
-        if humanoidRootPart and (humanoidRootPart.Position - UW_ENTER).Magnitude <= UW_ARRIVE_RADIUS then
-            if tick() - lastFire >= UW_REMOTE_EVERY then
-                lastFire = tick()
-                core.ReqEnter(UW_ENTER)
+
+        if humanoidRootPart then
+            local d = (humanoidRootPart.Position - UW_ENTER).Magnitude
+            if d > 5 then
+                humanoidRootPart.CFrame = targetCF
+                if idk then idk.CFrame = targetCF end
+            end
+            if d <= UW_ARRIVE_RADIUS then
+                if tick() - lastFire >= UW_REMOTE_EVERY then
+                    lastFire = tick()
+                    core.ReqEnter(UW_ENTER)
+                end
             end
         end
         task.wait(0.2)
@@ -1452,9 +1517,9 @@ function core.ExitUnderwaterCity()
     UWRouteBusy = true
     local ok = false
     local exitPos = UW_CITY_EXIT
-    local targetCF = CFrame.new(exitPos + Vector3.new(0, 4, 0))
+    local targetCF = CFrame.new(exitPos) 
     core.log("Fishman: exiting city")
-    core.gotoQuest(targetCF, true)
+    core.gotoQuest(targetCF, true, true, 8)
     local lastFire = 0
     local deadline = tick() + UW_MAX_TIME
     while tick() < deadline do
@@ -1463,6 +1528,13 @@ function core.ExitUnderwaterCity()
             ok = true
             core.log("Fishman: exited")
             break
+        end
+        if humanoidRootPart then
+            local d = (humanoidRootPart.Position - exitPos).Magnitude
+            if d > 5 then
+                humanoidRootPart.CFrame = targetCF
+                if idk then idk.CFrame = targetCF end
+            end
         end
         if tick() - lastFire >= UW_REMOTE_EVERY then
             lastFire = tick()
@@ -1856,6 +1928,7 @@ SetFruitHop = function(v)
     if v then vars._LastHop = 0 end
 end
 
+
 task.spawn(function()
     while true do
         task.wait()
@@ -2145,13 +2218,10 @@ task.spawn(function()
             end
 
             core.AnchorAboveMob(target)
-            local hrp = target:FindFirstChild("HumanoidRootPart")
-            if hrp and humanoidRootPart then
-                local ay = (Config.FarmMethod == "Fruit") and (vars.FruitAttackY or 10) or (vars.AttackY or 12)
-                if Config.FarmMethod == "Gun" then ay = 8 end
-                local want = hrp.Position + Vector3.new(0, ay, 0)
-                local dist = (humanoidRootPart.Position - want).Magnitude
-                if dist <= (vars.SettleRange or 15) then
+            local lockCF = core.getMobLockCFrame(target)
+            if lockCF and humanoidRootPart then
+                local hd = core.horizDist(humanoidRootPart.Position, lockCF.Position)
+                if hd <= (vars.SettleRange or 15) then
                     core.attack(target)
                 end
             end
