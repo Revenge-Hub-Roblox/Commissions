@@ -285,6 +285,83 @@ local quest_blacklist = {
     Trainees = true,
 }
 
+local boss_mob_names = {
+    ["Saber Expert"] = true,
+    ["The Saw"] = true,
+    ["Greybeard"] = true,
+    ["The Gorilla King"] = true,
+    ["Bobby"] = true,
+    ["Yeti"] = true,
+    ["Mob Leader"] = true,
+    ["Vice Admiral"] = true,
+    ["Warden"] = true,
+    ["Chief Warden"] = true,
+    ["Magma Admiral"] = true,
+    ["Fishman Lord"] = true,
+    ["Wysper"] = true,
+    ["Thunder God"] = true,
+    ["Cyborg"] = true,
+    ["Diamond"] = true,
+    ["Jeremy"] = true,
+    ["Fajita"] = true,
+    ["Don Swan"] = true,
+    ["Smoke Admiral"] = true,
+    ["Cursed Captain"] = true,
+    ["Darkbeard"] = true,
+    ["Order"] = true,
+    ["Cake Queen"] = true,
+    ["Dough King"] = true,
+    ["Soul Reaper"] = true,
+    ["Tide Keeper"] = true,
+    ["Island Empress"] = true,
+    ["Captain Elephant"] = true,
+    ["Beautiful Pirate"] = true,
+    ["Longma"] = true,
+    ["Stone"] = true,
+    ["Hydra Leader"] = true,
+    ["Kilo Admiral"] = true,
+    ["Captain Foot"] = true,
+    ["Core"] = true,
+}
+
+function core.isBossQuest(entry, targets)
+    if not entry then return false end
+    local name = tostring(entry.Name or entry.DisplayName or "")
+    local internal = tostring(entry.InternalName or "")
+    local lower = string.lower(name .. " " .. internal)
+    if string.find(lower, "boss", 1, true) then
+        return true
+    end
+    if type(targets) == "table" then
+        for _, t in ipairs(targets) do
+            local mob = t.Name or t
+            if type(mob) == "string" and boss_mob_names[mob] then
+                return true
+            end
+        end
+    end
+    if type(entry.Task) == "table" then
+        for mobName, req in pairs(entry.Task) do
+            if type(mobName) == "string" and boss_mob_names[mobName] then
+                return true
+            end
+            local need = type(req) == "number" and req or (type(req) == "table" and req.Amount) or 1
+            if need == 1 and type(mobName) == "string" then
+                local m = string.lower(mobName)
+                if string.find(m, "admiral", 1, true)
+                    or string.find(m, "king", 1, true)
+                    or string.find(m, "queen", 1, true)
+                    or string.find(m, "lord", 1, true)
+                    or string.find(m, "captain", 1, true)
+                then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
 local fruit_price_data = {
     ["Rocket-Rocket"] = 5000, ["Spin-Spin"] = 7500, ["Chop-Chop"] = 30000,
     ["Spring-Spring"] = 60000, ["Bomb-Bomb"] = 80000, ["Smoke-Smoke"] = 100000,
@@ -938,6 +1015,15 @@ function core.getBestQuest()
                 then
                     local targets = core.getQuestTargets(entry.Task)
                     if #targets > 0 then
+                        local check = {
+                            Name = entry.Name,
+                            DisplayName = entry.Name,
+                            InternalName = quest_Name,
+                            Task = entry.Task,
+                        }
+                        if core.isBossQuest(check, targets) then
+                            continue
+                        end
                         if not best or entry.LevelReq > best.LevelReq then
                             best = {
                                 InternalName = quest_Name,
@@ -1984,6 +2070,20 @@ task.spawn(function()
             else
                 if progress.Finished then
                     core.log("quest finished")
+                    CurrentTarget = nil
+                    pendingMobName = nil
+                    pcall(function() xuynia_RF:InvokeServer("AbandonQuest") end)
+                    task.wait(0.4)
+                    vars._LastQuestTry = 0
+                    return
+                end
+                if core.isBossQuest({
+                    Name = progress.DisplayName,
+                    DisplayName = progress.DisplayName,
+                    InternalName = progress.InternalName,
+                    Task = progress.Task,
+                }, progress.Targets) then
+                    core.log("skip boss quest: " .. tostring(progress.DisplayName or progress.InternalName))
                     CurrentTarget = nil
                     pendingMobName = nil
                     pcall(function() xuynia_RF:InvokeServer("AbandonQuest") end)
